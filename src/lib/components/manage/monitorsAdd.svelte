@@ -29,6 +29,7 @@
     DefaultTCPEval,
     DefaultPingEval,
     DefaultGamedigEval,
+    DefaultRemoteFilesEval,
     GAMEDIG_TIMEOUT
   } from "$lib/anywhere.js";
 
@@ -139,6 +140,13 @@
         guessPort: false,
         requestRules: false,
         eval: DefaultGamedigEval
+      },
+      remotefilesConfig: {
+        timeout: 5000,
+        serverUrl: "",
+        eval: DefaultRemoteFilesEval,
+        folders: [],
+        secrets: [],
       }
     };
   }
@@ -179,6 +187,8 @@
       newMonitor.heartbeatConfig = JSON.parse(newMonitor.type_data);
     } else if (newMonitor.monitor_type == "GAMEDIG") {
       newMonitor.gamedigConfig = JSON.parse(newMonitor.type_data);
+    } else if (newMonitor.monitor_type == "REMOTEFILES") {
+      newMonitor.remotefilesConfig = JSON.parse(newMonitor.type_data);
     }
     showAddMonitor = true;
   }

@@ -449,6 +449,56 @@
       }
 
       newMonitor.type_data = JSON.stringify(newMonitor.gamedigConfig);
+    } else if (newMonitor.monitor_type === "REMOTEFILES") {
+      // validating remote url
+      try{
+        const url = new URL(newMonitor.remotefilesConfig.serverUrl);
+        if(!newMonitor.remotefilesConfig.serverUrl){
+          invalidFormMessage = "Server URL is required";
+          return;
+        }
+        if (['ftp:','ftps:','sftp:'].indexOf(url.protocol) === -1) {
+          invalidFormMessage = `Protocol not supported ${url.protocol}`;
+          return;
+        }
+      }catch (error) {
+        invalidFormMessage = "Invalid URL";
+        return;
+      }
+
+      // validating timeout
+      if (!!newMonitor.remotefilesConfig.timeout && isNaN(newMonitor.remotefilesConfig.timeout)) {
+        invalidFormMessage = "Timeout should be a number";
+        return;
+      }
+
+      // validating secrets
+      newMonitor.remotefilesConfig.secrets = newMonitor.remotefilesConfig.secrets.filter(s=> !(s.name == "" && s.value == ""));
+      for(const secret  of newMonitor.remotefilesConfig.secrets){
+        if(!secret.name){
+          invalidFormMessage = "Secret name is required";
+          return;
+        }
+        if(!secret.value){
+          invalidFormMessage = "Secret value is required";
+          return;
+        }
+      }
+
+      // validating extra folders
+      newMonitor.remotefilesConfig.folders = newMonitor.remotefilesConfig.folders.filter((folder) => folder.trim() !== "");
+      
+      // validating eval function
+      if (!!newMonitor.remotefilesConfig.eval) {
+        newMonitor.remotefilesConfig.eval = newMonitor.remotefilesConfig.eval.trim();
+
+        if (!(await isValidEval(newMonitor.remotefilesConfig.eval))) {
+          invalidFormMessage = invalidFormMessage + ". Invalid eval";
+          return;
+        }
+      }
+
+      newMonitor.type_data = JSON.stringify(newMonitor.remotefilesConfig);
     }
     formState = "loading";
 
@@ -732,6 +782,7 @@
                 <Select.Item value="SQL" label="SQL" class="text-sm font-medium">SQL</Select.Item>
                 <Select.Item value="HEARTBEAT" label="HEARTBEAT" class="text-sm font-medium">HEARTBEAT</Select.Item>
                 <Select.Item value="GAMEDIG" label="GAMEDIG" class="text-sm font-medium">GAMEDIG</Select.Item>
+                <Select.Item value="REMOTEFILES" label="REMOTEFILES" class="text-sm font-medium">REMOTEFILES</Select.Item>
               </Select.Group>
             </Select.Content>
           </Select.Root>
@@ -1455,6 +1506,141 @@
               />
             </div>
           </div>
+        </div>
+      {:else if newMonitor.monitor_type == "REMOTEFILES"}
+        <div class="mt-4 grid grid-cols-6 gap-2">
+          <div class="col-span-1">
+            <Label for="remotefilesTimeout">
+              Timeout(ms)
+              <span class="text-red-500">*</span>
+            </Label>
+            <Input bind:value={newMonitor.remotefilesConfig.timeout} id="remotefilesTimeout" />
+          </div>
+          <div class="col-span-5">
+            <Label for="remotefilesUrl">
+              Server URL
+              <span class="text-red-500">*</span>
+            </Label>
+            <Input bind:value={newMonitor.remotefilesConfig.serverUrl} id="remotefilesUrl" />
+          </div>
+
+          <!-- Monitor Secrets -->
+          <div class="col-span-6 mt-2">
+            <Label for="remotefilesSecrets">Monitor Secrets</Label>
+            <div class="grid grid-cols-6 gap-2">
+              {#each newMonitor.remotefilesConfig.secrets as secret, index}
+                <div class="col-span-1">
+                  <Input bind:value={secret.name} id={"secret-name-" + index} placeholder="name" />
+                </div>
+                <div class="col-span-4">
+                  <Input bind:value={secret.value} id={"secret-value-" + index} placeholder="value" />
+                </div>
+                <div class="col-span-1 pt-2">
+                  <Button
+                    class=" h-6 w-6 p-1"
+                    variant="secondary"
+                    on:click={() => {
+                      newMonitor.remotefilesConfig.secrets = newMonitor.remotefilesConfig.secrets.filter((_, i) => i !== index);
+                    }}
+                  ><Trash class="h-5 w-5" />
+                  </Button>
+                </div>
+              {/each}
+            </div>
+
+            <div class="relative pb-8 pt-2">
+              <p class="my-1 text-xs text-muted-foreground">
+              You can protected sensitive information in your URL by using monitor secrets. <a
+                target="_blank"
+                class="font-medium text-primary"
+                href="https://kener.ing/docs/monitors-remotefiles#monitor-secrets">Read the docs</a
+              > to learn more.
+              </p>
+              <hr class="border-1 border-border-input relative top-4 h-px border-dashed" />
+              <Button
+                on:click={()=>{
+                  newMonitor.remotefilesConfig.secrets = [...newMonitor.remotefilesConfig.secrets, { name: "", value: "" }];
+                }}
+                variant="secondary"
+                class="absolute left-1/2 h-8 -translate-x-1/2  p-2 text-xs  "
+              >
+                <Plus class="mr-2 h-4 w-4" /> Add Secret
+              </Button>
+            </div>
+          </div>
+
+          <!-- Extra Folders -->
+          <div class="col-span-6 mt-2">
+            <Label for="remotefilesFolders">Extra Folders</Label>
+            <div class="grid grid-cols-6 gap-2">
+              {#each newMonitor.remotefilesConfig.folders as folder, index}
+                <div class="col-span-5">
+                  <Input bind:value={folder} id={"folder-" + index} placeholder="remote path" />
+                </div>
+                <div class="col-span-1 pt-2">
+                  <Button
+                    class=" h-6 w-6 p-1"
+                    variant="secondary"
+                    on:click={() => {
+                      newMonitor.remotefilesConfig.folders = newMonitor.remotefilesConfig.folders.filter((_, i) => i !== index);
+                    }}
+                  ><Trash class="h-5 w-5" />
+                  </Button>
+                </div>
+              {/each}
+            </div>
+
+            <div class="relative pb-8 pt-2">
+              <p class="my-1 text-xs text-muted-foreground">
+                You can add extra folders to be listed and provided to the custom eval function. <a
+                  target="_blank"
+                  class="font-medium text-primary"
+                  href="https://kener.ing/docs/monitors-remotefiles#extra-folders">Read the docs</a
+                > to learn more.
+              </p>
+              <hr class="border-1 border-border-input relative top-4 h-px border-dashed" />
+              <Button
+                on:click={()=>{
+                  newMonitor.remotefilesConfig.folders = [...newMonitor.remotefilesConfig.folders, ""];
+                }}
+                variant="secondary"
+                class="absolute left-1/2 h-8 -translate-x-1/2  p-2 text-xs  "
+                >
+                <Plus class="mr-2 h-4 w-4" /> Add Folder
+              </Button>
+            </div>
+          </div>
+                    
+          <!-- Evals -->
+          <div class="col-span-6">
+            <Label for="remotefilesEval">remotefiles Eval</Label>
+            <p class="my-1 text-xs text-muted-foreground">
+              You can write a custom eval function to evaluate the response. The function should return a promise that
+              resolves to an object with status and latency. <a
+                target="_blank"
+                class="font-medium text-primary"
+                href="https://kener.ing/docs/monitors-remotefiles#eval">Read the docs</a
+              > to learn
+            </p>
+            
+            <div class="overflow-hidden rounded-md">
+              <CodeMirror
+                bind:value={newMonitor.remotefilesConfig.eval}
+                lang={javascript()}
+                theme={$mode == "dark" ? githubDark : githubLight}
+                styles={{
+                  "&": {
+                    width: "100%",
+                    maxWidth: "100%",
+                    height: "16rem",
+                    border: "1px solid hsl(var(--border) / var(--tw-border-opacity))",
+                    borderRadius: "0.375rem"
+                  }
+                }}
+              />
+            </div>
+          </div>
+
         </div>
       {/if}
       {#if !!newMonitor.id}

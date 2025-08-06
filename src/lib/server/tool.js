@@ -4,6 +4,9 @@ import knexOb from "../../../knexfile.js";
 import crypto from "crypto";
 
 import dotenv from "dotenv";
+import { get } from "http";
+import { readFileSync } from "fs";
+
 dotenv.config();
 const IsValidURL = function (url) {
   return /^(http|https):\/\/[^ "]+$/.test(url);
@@ -311,6 +314,40 @@ function GenerateRandomNumber(digits) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// function to handle secrets in monitor.type_data object
+function ResolveSecrets(type_data) {
+  if (!Array.isArray(type_data.secrets) || type_data.secrets.length === 0){
+    return type_data;
+  }
+  const secretMap = new Map(type_data.secrets.map(s => [s.name, s.value]));
+  function replaceInString(str) {
+    let result = str;
+    for (const [name, value] of secretMap) {
+      if(!process.env[value]){
+        throw new Error(`Environment variable ${name} not set`)
+      }
+      const placeholder = `$${name}`;
+      let content = process.env[value];
+      if(value.endsWith('_FILE')){
+        content = readFileSync(content, 'utf8');
+      }
+      result = result.split(placeholder).join(content.trimEnd());
+    }
+    return result;
+  }
+  const entries = Object.entries(type_data);
+  const skipFields = ['secrets', 'folders', 'eval'];
+  const newEntries = entries.map(([key, value]) => {
+    if (typeof value === 'string' && !skipFields.includes(key)) {
+      return [key, replaceInString(value)];
+    } else {
+      return [key, value];
+    }
+  });
+  const newTarget = Object.fromEntries(newEntries);
+  return newTarget;
+}
+
 export {
   IsValidURL,
   IsValidHTTPMethod,
@@ -342,4 +379,5 @@ export {
   HashString,
   ValidateEmail,
   GenerateRandomNumber,
+  ResolveSecrets,
 };

@@ -148,7 +148,7 @@ export const DefaultAPIEval = `(async function (statusCode, responseTime, respon
 			status: 'UP',
 			latency: responseTime,
         }
-    } 
+    }
 	return {
 		status: 'DOWN',
 		latency: responseTime,
@@ -193,6 +193,13 @@ export const DefaultGamedigEval = `(async function (responseTime, responseRaw) {
 })`;
 export const GAMEDIG_TIMEOUT = 10 * 1000; // 10 seconds
 export const GAMEDIG_SOCKET_TIMEOUT = 2 * 1000; // 2 seconds
+
+export const DefaultRemoteFilesEval = `(async function(connectionTime, listingTime, files){
+	return {
+		status: 'UP',
+		latency: connectionTime + listingTime,
+	}
+})`;
 
 export const ErrorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <circle cx="30" cy="24" r="10"/>

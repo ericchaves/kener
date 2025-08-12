@@ -116,6 +116,8 @@ const Minuter = async (monitor) => {
       realTimeData[startOfMinute] = await serviceClient.execute();
     } else if (monitor.monitor_type === "GAMEDIG") {
       realTimeData[startOfMinute] = await serviceClient.execute();
+    } else if (monitor.monitor_type === "REMOTEFILES") {
+      realTimeData[startOfMinute] = await serviceClient.execute();
     }
 
     manualData = await manualIncident(monitor);

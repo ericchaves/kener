@@ -183,7 +183,7 @@ export const CreateMonitor = async (monitor) => {
   if (monitorData.id) {
     throw new Error("monitor id must be empty or 0");
   }
-  return await db.insertMonitor(monitorData);
+  return await db.eartbeat(monitorData);
 };
 
 export const UpdateMonitor = async (monitor) => {
@@ -404,6 +404,11 @@ export const GetLastHeartbeat = async (monitor_tag) => {
   return await db.getLastHeartbeat(monitor_tag);
 };
 
+export const CountPingbacks = async(monitor_tag, minTimestamp, timestamp) => {
+  return await db.countPingbacks(monitor_tag, minTimestamp, timestamp);
+}
+
+
 export const ProcessGroupUpdate = async (data) => {
   //find all active monitor that are of type group
   let groupActiveMonitors = await db.getMonitors({ status: "ACTIVE", monitor_type: "GROUP" });
@@ -521,6 +526,61 @@ export const RegisterHeartbeat = async (tag, secret) => {
     }
   } catch (e) {
     console.error("Error registering heartbeat:", e);
+  }
+  return null;
+};
+
+export const RegisterPingback = async (tag, secret, req) => {
+  let monitor = await db.getMonitorByTag(tag);
+  if (!monitor) {
+    return null;
+  }
+  let typeData = monitor.type_data;
+  if (!typeData) {
+    return null;
+  }
+  try {
+    let pingbackConfig = JSON.parse(typeData);
+    let pingbackSecret = pingbackConfig.secretString;
+    if (pingbackSecret !== secret) {
+      return null;
+    }
+
+    let status = monitor.default_status;
+    let latency = 0;
+    let type = REALTIME;
+
+    if(pingbackConfig.windowMode === "DYNAMIC"){
+      const evalFunction = new Function("req",`return (${pingbackConfig.eval})(req);`);
+      evalFunction.bind({DEFAULT_STATUS: status});
+      try{
+        let evalResp = await evalFunction(req);
+        if(evalResp.status){
+          status = evalResp.status;
+        }
+        if(!isNaN(parseInt(evalResp.latency))){
+          latency = parseInt(evalResp.latency);
+        }
+      }catch(e){
+        status = DOWN;
+        type = ERROR;
+        console.error("Error evaluating pingback:", {
+          config: pingbackConfig.eval,
+          error: e.message,
+          req: JSON.stringify(req)
+        });
+      };
+
+      return InsertMonitoringData({
+        monitor_tag: monitor.tag,
+        timestamp: GetNowTimestampUTC(),
+        status,
+        latency,
+        type,
+      });
+    }
+  } catch (e) {
+    console.error("Error registering pingback:", e);
   }
   return null;
 };

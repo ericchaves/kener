@@ -30,6 +30,7 @@
     IsValidPort
   } from "$lib/clientTools.js";
   import { GAMEDIG_SOCKET_TIMEOUT } from "$lib/anywhere";
+  import { TimePicker } from "$lib/components/ui/time-picker";
 
   const dispatch = createEventDispatcher();
   let AllGamesList = JSON.parse(AllGamesListRaw);
@@ -499,6 +500,49 @@
       }
 
       newMonitor.type_data = JSON.stringify(newMonitor.remotefilesConfig);
+    } else if (newMonitor.monitor_type === "PINGBACK") {
+
+      // validate monitor window mode
+      if (!/^SLIDING|DYNAMIC|FIXED$/ig.test(newMonitor.pingbackConfig.windowMode)) {
+        invalidFormMessage = "Window mode is required";
+        return;
+      }
+
+      if(newMonitor.pingbackConfig.windowMode === "FIXED"){
+        if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowStart)) {
+          invalidFormMessage = "Time window start should be in HH:MM format";
+          return;
+        }
+        if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowEnd)) {
+          invalidFormMessage = "Time window end should be in HH:MM format";
+          return;
+        }
+        let starTime = new Date();
+        starTime.setHours(parseInt(newMonitor.pingbackConfig.timeWindowStart.split(":")[0]));
+        starTime.setMinutes(parseInt(newMonitor.pingbackConfig.timeWindowStart.split(":")[1]));
+        let endTime = new Date();
+        endTime.setHours(parseInt(newMonitor.pingbackConfig.timeWindowEnd.split(":")[0]));
+        endTime.setMinutes(parseInt(newMonitor.pingbackConfig.timeWindowEnd.split(":")[1]));
+        if (starTime > endTime) {
+          invalidFormMessage = "Time window start should be less than time window end";
+          return;
+        }
+      }
+
+      // validate down and downgraded counters for sliding and fixed window mode
+      if(newMonitor.pingbackConfig.windowMode !== "DYNAMIC"){
+        if (!!!newMonitor.pingbackConfig.degradedCount || isNaN(newMonitor.pingbackConfig.degradedCount)) {
+          invalidFormMessage = "Degraded count must be a number";
+          return;
+        }
+
+        if (!!!newMonitor.pingbackConfig.upCount || isNaN(newMonitor.pingbackConfig.upCount)) {
+          invalidFormMessage = "Up count must be a number";
+          return;
+        }
+      }
+        
+      newMonitor.type_data = JSON.stringify(newMonitor.pingbackConfig);
     }
     formState = "loading";
 
@@ -528,6 +572,14 @@
     pg: "PostgreSQL",
     mysql2: "MySQL"
   };
+  
+  let pingbackWindowModes = {
+    DYNAMIC: "dynamic",
+    SLIDING: "sliding",
+    FIXED: "fixed"
+  };
+ 
+  
   let deleteMonitorConfirmText = "";
   let deletingMonitor = false;
 
@@ -783,6 +835,7 @@
                 <Select.Item value="HEARTBEAT" label="HEARTBEAT" class="text-sm font-medium">HEARTBEAT</Select.Item>
                 <Select.Item value="GAMEDIG" label="GAMEDIG" class="text-sm font-medium">GAMEDIG</Select.Item>
                 <Select.Item value="REMOTEFILES" label="REMOTEFILES" class="text-sm font-medium">REMOTEFILES</Select.Item>
+                <Select.Item value="PINGBACK" label="PINGBACK" class="text-sm font-medium">PINGBACK</Select.Item>
               </Select.Group>
             </Select.Content>
           </Select.Root>
@@ -1641,6 +1694,142 @@
             </div>
           </div>
 
+        </div>
+      {:else if newMonitor.monitor_type == "PINGBACK"}
+        <div>
+          <div class="relative mt-4 justify-start gap-x-4">
+            <p class="truncate rounded-md border bg-popover p-2 pr-8 text-sm font-medium">
+              Pingback url: <span class="text-muted-foreground">
+                {$page.data.siteData.siteURL +
+                  `${base}/api/pingback/${newMonitor.tag}:${newMonitor.pingbackConfig.secretString}`}</span
+              >
+            </p>
+            <Button
+              class="copybtn absolute right-2 top-2 flex h-6 w-6 justify-center p-1"
+              variant="ghost"
+              size="icon"
+              on:click={() =>
+                copyToClipboard(
+                  $page.data.siteData.siteURL +
+                    `${base}/api/pingback/${newMonitor.tag}:${newMonitor.pingbackConfig.secretString}`
+                )}
+            >
+              <Check class="check-btn absolute  h-4 w-4 text-green-500" />
+              <Clipboard class="copy-btn absolute h-4 w-4" />
+            </Button>
+          </div>
+          <div class="mt-4 flex gap-2">
+
+            <div class="w-36">
+              <Label for="PingbackWindowMode">Window mode</Label><span class="text-red-500">*</span>
+              <Select.Root
+                portal={null}
+                onSelectedChange={(e) => {
+                  newMonitor.pingbackConfig.windowMode = e.value;
+                }}
+                selected={{
+                  value: newMonitor.pingbackConfig.windowMode,
+                  label: pingbackWindowModes[newMonitor.pingbackConfig.windowMode]
+                }}
+              >
+                <Select.Trigger id="PingbackWindowMode">
+                  <Select.Value bind:value={newMonitor.pingbackConfig.windowMode} placeholder="mode" />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Group>
+                    <Select.Label>Select mode</Select.Label>
+                    <Select.Item value="SLIDING" label={pingbackWindowModes.SLIDING} class="text-sm font-medium">
+                      {pingbackWindowModes.SLIDING}
+                    </Select.Item>
+                    <Select.Item value="FIXED" label={pingbackWindowModes.FIXED}  class="text-sm font-medium">
+                      {pingbackWindowModes.FIXED}
+                    </Select.Item>
+                    <Select.Item value="DYNAMIC" label={pingbackWindowModes.DYNAMIC} class="text-sm font-medium">
+                      {pingbackWindowModes.DYNAMIC}
+                    </Select.Item>
+                  </Select.Group>
+                </Select.Content>
+              </Select.Root>
+            </div>
+          
+            {#if newMonitor.pingbackConfig.windowMode != "DYNAMIC"}
+            <div class="w-36">
+              <Label for="PingbackUpCount">UP count</Label><span class="text-red-500">*</span>
+              <Input
+                type="number"
+                bind:value={newMonitor.pingbackConfig.upCount}
+                disabled={newMonitor.pingbackConfig.windowMode === "DYNAMIC"}
+                id="PingbackUpCount"
+              />
+            </div>
+            <div class="w-36">
+              <Label for="PingbackDegradedCount">DEGRADED count</Label><span class="text-red-500">*</span>
+              <Input
+                class="w-full"
+                type="number"
+                bind:value={newMonitor.pingbackConfig.degradedCount}
+                disabled={newMonitor.pingbackConfig.windowMode === "DYNAMIC"}
+                id="PingbackDegradedCount"
+              />
+            </div>
+            {/if}
+
+            {#if newMonitor.pingbackConfig.windowMode == "FIXED"}
+              <div>
+                <Label for="PingbackWindowStart">Time window start</Label><span class="text-red-500">*</span>
+                <TimePicker id="PingbackWindowStart" bind:value={newMonitor.pingbackConfig.timeWindowStart} />
+              </div>
+              <div>
+                <Label for="PingbackWindowEnd">Time window end</Label><span class="text-red-500">*</span>
+                <TimePicker id="PingbackWindowEnd" bind:value={newMonitor.pingbackConfig.timeWindowEnd} />
+              </div>
+          {/if}
+          </div>
+
+          
+
+          <div class="col-span-1">
+            <span class="text-xs text-muted-foreground"
+              >Refer to the
+              <a target="_blank" class="font-medium text-primary" href="https://kener.ing/docs/monitors-pingback">
+                documentation
+              </a> for more details.
+            </span>
+          </div>
+
+          {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}
+          <div class="col-span-6">
+            <Label for="PingbackEvals">Pingback dynamic eval</Label>
+            <p class="my-1 text-xs text-muted-foreground">
+              You can write a custom eval function to evaluate the payload sent. The function should return a promise that
+              resolves to an object with status and latency. <a
+                target="_blank"
+                class="font-medium text-primary"
+                href="https://kener.ing/docs/monitors-pingback#eval">Read the docs</a
+              > to learn
+            </p>
+            
+            <div class="overflow-hidden rounded-md">
+              <CodeMirror
+                bind:value={newMonitor.pingbackConfig.eval}
+                lang={javascript()}
+                theme={$mode == "dark" ? githubDark : githubLight}
+                styles={{
+                  "&": {
+                    width: "100%",
+                    maxWidth: "100%",
+                    height: "16rem",
+                    border: "1px solid hsl(var(--border) / var(--tw-border-opacity))",
+                    borderRadius: "0.375rem"
+                  }
+                }}
+              />
+            </div>
+            
+          </div>
+          {/if}
+
+          
         </div>
       {/if}
       {#if !!newMonitor.id}

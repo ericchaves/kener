@@ -99,6 +99,16 @@ class DbImpl {
       .first();
   }
 
+  // count pusbacks signals between two timestamps
+  async countPingbacks(monitor_tag, minTimestamp, timestamp){
+    const result = await this.knex("monitoring_data")
+      .where("monitor_tag", monitor_tag)
+      .where("type", SIGNAL)
+      .whereBetween("timestamp", [minTimestamp, timestamp])
+      .count('* as count').first();
+      return result.count;
+  }
+
   //given monitor_tag, start and end timestamp in utc seconds return total degraded, up, down, avg(latency), max(latency), min(latency)
   async getAggregatedMonitoringData(monitor_tag, start, end) {
     return await this.knex("monitoring_data")
@@ -156,7 +166,7 @@ class DbImpl {
         this.knex.raw("COUNT(*) as total_entries"),
         this.knex.raw("AVG(latency) as latency"),
         this.knex.raw(`
-				CASE 
+				CASE
 				WHEN SUM(CASE WHEN status = 'DOWN' THEN 1 ELSE 0 END) > 0 THEN 'DOWN'
 				WHEN SUM(CASE WHEN status = 'DEGRADED' THEN 1 ELSE 0 END) > 0 THEN 'DEGRADED'
 				ELSE 'UP'

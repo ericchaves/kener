@@ -30,7 +30,10 @@
     DefaultPingEval,
     DefaultGamedigEval,
     DefaultRemoteFilesEval,
-    GAMEDIG_TIMEOUT
+    GAMEDIG_TIMEOUT,
+
+    DefaultPingbackEval
+
   } from "$lib/anywhere.js";
 
   export let categories = [];
@@ -147,6 +150,15 @@
         eval: DefaultRemoteFilesEval,
         folders: [],
         secrets: [],
+      },
+      pingbackConfig: {
+        upCount: 3,
+        degradedCount: 1,
+        timeWindowStart: "07:00",
+        timeWindowEnd: "09:00",
+        secretString: RandomString(32),
+        windowMode: "SLIDING", // DYNAMIC, SLIDING or FIXED
+        eval: DefaultPingbackEval,
       }
     };
   }
@@ -189,6 +201,8 @@
       newMonitor.gamedigConfig = JSON.parse(newMonitor.type_data);
     } else if (newMonitor.monitor_type == "REMOTEFILES") {
       newMonitor.remotefilesConfig = JSON.parse(newMonitor.type_data);
+    } else if (newMonitor.monitor_type == "PINGBACK") {
+      newMonitor.pingbackConfig = JSON.parse(newMonitor.type_data);
     }
     showAddMonitor = true;
   }

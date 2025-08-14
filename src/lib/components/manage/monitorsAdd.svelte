@@ -147,6 +147,13 @@
         eval: DefaultRemoteFilesEval,
         folders: [],
         secrets: [],
+      },
+      pushbackConfig: {
+        minimum: 1,
+        expected: 3,
+        timeStart: "07:00",
+        timeEnd: "09:00",
+        secretString: RandomString(32),
       }
     };
   }
@@ -189,6 +196,8 @@
       newMonitor.gamedigConfig = JSON.parse(newMonitor.type_data);
     } else if (newMonitor.monitor_type == "REMOTEFILES") {
       newMonitor.remotefilesConfig = JSON.parse(newMonitor.type_data);
+    } else if (newMonitor.monitor_type == "PUSHBACK") {
+      newMonitor.pushbackConfig = JSON.parse(newMonitor.type_data);
     }
     showAddMonitor = true;
   }

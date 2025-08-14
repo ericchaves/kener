@@ -9,6 +9,7 @@ import SqlCall from "./sqlCall.js";
 import HeartbeatCall from "./heartbeatCall.js";
 import GamedigCall from "./gamedigCall.js";
 import RemoteServerCall from "./remotefilesCall.js";
+import PushbackCall from './pushbackCall.js';
 
 class Service {
   service;
@@ -36,6 +37,8 @@ class Service {
       this.service = new GamedigCall(monitor);
     } else if (monitor.monitor_type === "REMOTEFILES") {
       this.service = new RemoteServerCall(monitor);
+    } else if (monitor.monitor_type === "PUSHBACK") {
+      this.service = new PushbackCall(monitor);
     } else {
       console.log("Invalid monitor.monitor_type ", monitor.monitor_type);
       process.exit(1);

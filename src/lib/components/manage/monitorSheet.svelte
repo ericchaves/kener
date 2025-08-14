@@ -30,6 +30,7 @@
     IsValidPort
   } from "$lib/clientTools.js";
   import { GAMEDIG_SOCKET_TIMEOUT } from "$lib/anywhere";
+  import { TimePicker } from "$lib/components/ui/time-picker";
 
   const dispatch = createEventDispatcher();
   let AllGamesList = JSON.parse(AllGamesListRaw);
@@ -499,6 +500,42 @@
       }
 
       newMonitor.type_data = JSON.stringify(newMonitor.remotefilesConfig);
+    } else if (newMonitor.monitor_type === "PUSHBACK") {
+      if (
+        !!!newMonitor.pushbackConfig.expected ||
+        isNaN(newMonitor.pushbackConfig.expected) ||
+        newMonitor.pushbackConfig.expected < 1
+      ) {
+        invalidFormMessage = "Expected counter must be a number greater than 0";
+        return;
+      }
+      if (
+        !!!newMonitor.pushbackConfig.minimum ||
+        isNaN(newMonitor.pushbackConfig.minimum) ||
+        newMonitor.pushbackConfig.minimum > newMonitor.pushbackConfig.expected
+      ) {
+        invalidFormMessage = "Minimum counter must be a number greater than 0 and less than than Expected counter";
+        return;
+      }
+      if (!/^\d{2}:\d{2}$/.test(newMonitor.pushbackConfig.startTime)) {
+        invalidFormMessage = "Count start time should be in HH:MM format";
+        return;
+      }
+      if (!/^\d{2}:\d{2}$/.test(newMonitor.pushbackConfig.endTime)) {
+        invalidFormMessage = "Count end time should be in HH:MM format";
+        return;
+      }
+      let starTime = new Date();
+      starTime.setHours(parseInt(newMonitor.pushbackConfig.startTime.split(":")[0]));
+      starTime.setMinutes(parseInt(newMonitor.pushbackConfig.startTime.split(":")[1]));
+      let endTime = new Date();
+      endTime.setHours(parseInt(newMonitor.pushbackConfig.endTime.split(":")[0]));
+      endTime.setMinutes(parseInt(newMonitor.pushbackConfig.endTime.split(":")[1]));
+      if (starTime > endTime) {
+        invalidFormMessage = "Start time should be less than end time";
+        return;
+      }
+      newMonitor.type_data = JSON.stringify(newMonitor.pushbackConfig);
     }
     formState = "loading";
 
@@ -783,6 +820,7 @@
                 <Select.Item value="HEARTBEAT" label="HEARTBEAT" class="text-sm font-medium">HEARTBEAT</Select.Item>
                 <Select.Item value="GAMEDIG" label="GAMEDIG" class="text-sm font-medium">GAMEDIG</Select.Item>
                 <Select.Item value="REMOTEFILES" label="REMOTEFILES" class="text-sm font-medium">REMOTEFILES</Select.Item>
+                <Select.Item value="PUSHBACK" label="PUSHBACK" class="text-sm font-medium">PUSHBACK</Select.Item>
               </Select.Group>
             </Select.Content>
           </Select.Root>
@@ -1641,6 +1679,67 @@
             </div>
           </div>
 
+        </div>
+      {:else if newMonitor.monitor_type == "PUSHBACK"}
+        <div>
+          <div class="relative mt-4 justify-start gap-x-4">
+            <p class="truncate rounded-md border bg-popover p-2 pr-8 text-sm font-medium">
+              Pushback url: <span class="text-muted-foreground">
+                {$page.data.siteData.siteURL +
+                  `${base}/api/pushback/${newMonitor.tag}:${newMonitor.pushbackConfig.secretString}`}</span
+              >
+            </p>
+            <Button
+              class="copybtn absolute right-2 top-2 flex h-6 w-6 justify-center p-1"
+              variant="ghost"
+              size="icon"
+              on:click={() =>
+                copyToClipboard(
+                  $page.data.siteData.siteURL +
+                    `${base}/api/pushback/${newMonitor.tag}:${newMonitor.pushbackConfig.secretString}`
+                )}
+            >
+              <Check class="check-btn absolute  h-4 w-4 text-green-500" />
+              <Clipboard class="copy-btn absolute h-4 w-4" />
+            </Button>
+          </div>
+          <div class="mt-2 flex flex-row justify-start gap-x-4">
+            
+            <div>
+              <Label for="PushbackStartTime">Count start</Label><span class="text-red-500">*</span>
+              <TimePicker id="PushbackStartTime" bind:value={newMonitor.pushbackConfig.startTime} />
+            </div>
+            <div>
+              <Label for="PushbackEndTime">Count end</Label><span class="text-red-500">*</span>
+              <TimePicker id="PushbackEndTime" bind:value={newMonitor.pushbackConfig.endTime} />
+            </div>
+            <div>
+              <Label for="PushbackExpected">Expected count</Label><span class="text-red-500">*</span>
+              <Input
+                class="w-full"
+                type="number"
+                bind:value={newMonitor.pushbackConfig.expected}
+                id="PushbackExpected"
+              />
+            </div>
+            <div>
+              <Label for="PushbackMinimum">Minimum count</Label><span class="text-red-500">*</span>
+              <Input
+                type="number"
+                bind:value={newMonitor.pushbackConfig.minimum}
+                id="PushbackMinimum"
+              />
+            </div>
+          </div>
+
+          <div class="col-span-1">
+            <span class="text-xs text-muted-foreground"
+              >Refer to the
+              <a target="_blank" class="font-medium text-primary" href="https://kener.ing/docs/monitors-pushback">
+                documentation
+              </a> for more details.
+            </span>
+          </div>
         </div>
       {/if}
       {#if !!newMonitor.id}

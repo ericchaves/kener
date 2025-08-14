@@ -183,7 +183,7 @@ export const CreateMonitor = async (monitor) => {
   if (monitorData.id) {
     throw new Error("monitor id must be empty or 0");
   }
-  return await db.insertMonitor(monitorData);
+  return await db.eartbeat(monitorData);
 };
 
 export const UpdateMonitor = async (monitor) => {
@@ -404,6 +404,11 @@ export const GetLastHeartbeat = async (monitor_tag) => {
   return await db.getLastHeartbeat(monitor_tag);
 };
 
+export const CountPushbacks = async(monitor_tag, minTimestamp, timestamp) => {
+  return await db.countPushbacks(monitor_tag, minTimestamp, timestamp);
+}
+
+
 export const ProcessGroupUpdate = async (data) => {
   //find all active monitor that are of type group
   let groupActiveMonitors = await db.getMonitors({ status: "ACTIVE", monitor_type: "GROUP" });
@@ -521,6 +526,33 @@ export const RegisterHeartbeat = async (tag, secret) => {
     }
   } catch (e) {
     console.error("Error registering heartbeat:", e);
+  }
+  return null;
+};
+
+export const RegisterPushback = async (tag, secret) => {
+  let monitor = await db.getMonitorByTag(tag);
+  if (!monitor) {
+    return null;
+  }
+  let typeData = monitor.type_data;
+  if (!typeData) {
+    return null;
+  }
+  try {
+    let pushbackConfig = JSON.parse(typeData);
+    let pushbackSecret = pushbackConfig.secretString;
+    if (pushbackSecret === secret) {
+      return InsertMonitoringData({
+        monitor_tag: monitor.tag,
+        timestamp: GetNowTimestampUTC(),
+        status: UP,
+        latency: 0,
+        type: SIGNAL,
+      });
+    }
+  } catch (e) {
+    console.error("Error registering pushback:", e);
   }
   return null;
 };

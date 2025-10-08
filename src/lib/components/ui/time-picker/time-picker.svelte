@@ -21,6 +21,7 @@
   <div class="relative w-full">
     <input
       type="time"
+      step="60"
       {id}
       bind:value
       on:input={handleInput}

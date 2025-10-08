@@ -100,10 +100,11 @@ class DbImpl {
   }
 
   // count pusbacks signals between two timestamps
-  async countPingbacks(monitor_tag, minTimestamp, timestamp){
+  async countPingbacks(monitor_tag, minTimestamp, timestamp, status="UP"){
     const result = await this.knex("monitoring_data")
       .where("monitor_tag", monitor_tag)
       .where("type", SIGNAL)
+      .where("status", status)
       .whereBetween("timestamp", [minTimestamp, timestamp])
       .count('* as count').first();
       return result.count;

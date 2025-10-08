@@ -24,6 +24,7 @@
     allRecordTypes,
     ValidateIpAddress,
     ValidateCronExpression,
+    ValidateCronExecutionTimeWindow,
     IsValidHost,
     IsValidNameServer,
     GetGameFromId,
@@ -501,47 +502,173 @@
 
       newMonitor.type_data = JSON.stringify(newMonitor.remotefilesConfig);
     } else if (newMonitor.monitor_type === "PINGBACK") {
-
-      // validate monitor window mode
-      if (!/^SLIDING|DYNAMIC|FIXED$/ig.test(newMonitor.pingbackConfig.windowMode)) {
-        invalidFormMessage = "Window mode is required";
+      // Validate monitor window mode
+      if (!newMonitor.pingbackConfig.windowMode || 
+          !/^(SLIDING|DYNAMIC|FIXED)$/i.test(newMonitor.pingbackConfig.windowMode)) {
+        invalidFormMessage = "Window mode is required and must be SLIDING, DYNAMIC, or FIXED";
         return;
       }
-
-      if(newMonitor.pingbackConfig.windowMode === "FIXED"){
-        if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowStart)) {
-          invalidFormMessage = "Time window start should be in HH:MM format";
-          return;
-        }
-        if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowEnd)) {
-          invalidFormMessage = "Time window end should be in HH:MM format";
-          return;
-        }
-        let starTime = new Date();
-        starTime.setHours(parseInt(newMonitor.pingbackConfig.timeWindowStart.split(":")[0]));
-        starTime.setMinutes(parseInt(newMonitor.pingbackConfig.timeWindowStart.split(":")[1]));
-        let endTime = new Date();
-        endTime.setHours(parseInt(newMonitor.pingbackConfig.timeWindowEnd.split(":")[0]));
-        endTime.setMinutes(parseInt(newMonitor.pingbackConfig.timeWindowEnd.split(":")[1]));
-        if (starTime > endTime) {
-          invalidFormMessage = "Time window start should be less than time window end";
-          return;
-        }
+      // Validate secret string (required for all modes)
+      if (!newMonitor.pingbackConfig.secretString || 
+          newMonitor.pingbackConfig.secretString.trim() === "") {
+        invalidFormMessage = "Secret string is required";
+        return;
       }
-
-      // validate down and downgraded counters for sliding and fixed window mode
-      if(newMonitor.pingbackConfig.windowMode !== "DYNAMIC"){
-        if (!!!newMonitor.pingbackConfig.degradedCount || isNaN(newMonitor.pingbackConfig.degradedCount)) {
-          invalidFormMessage = "Degraded count must be a number";
-          return;
-        }
-
-        if (!!!newMonitor.pingbackConfig.upCount || isNaN(newMonitor.pingbackConfig.upCount)) {
-          invalidFormMessage = "Up count must be a number";
-          return;
-        }
-      }
+      if (newMonitor.pingbackConfig.windowMode === "DYNAMIC") {
         
+        // Validate eval function
+        newMonitor.pingbackConfig.eval = newMonitor.pingbackConfig.eval?.trim() || "";
+        
+        if (!newMonitor.pingbackConfig.eval) {
+          invalidFormMessage = "Eval function is required for DYNAMIC mode";
+          return;
+        }
+
+        if (!(await isValidEval(newMonitor.pingbackConfig.eval))) {
+          invalidFormMessage = invalidFormMessage + ". Invalid eval function";
+          return;
+        }
+
+        // Validate timeout (REQUIRED)
+        if (newMonitor.pingbackConfig.timeout === undefined || 
+            newMonitor.pingbackConfig.timeout === null ||
+            newMonitor.pingbackConfig.timeout === "") {
+          invalidFormMessage = "Timeout is required for DYNAMIC mode";
+          return;
+        }
+
+        const timeout = Number(newMonitor.pingbackConfig.timeout);
+        if (isNaN(timeout) || timeout <= 0) {
+          invalidFormMessage = "Timeout must be a positive number";
+          return;
+        }
+        newMonitor.pingbackConfig.timeout = timeout;
+
+        // Validate degradedTimeout (REQUIRED, can be 0 to disable DEGRADED status)
+        if (newMonitor.pingbackConfig.degradedTimeout === undefined || 
+            newMonitor.pingbackConfig.degradedTimeout === null ||
+            newMonitor.pingbackConfig.degradedTimeout === "") {
+          invalidFormMessage = "Degraded timeout is required for DYNAMIC mode";
+          return;
+        }
+
+        const degradedTimeout = Number(newMonitor.pingbackConfig.degradedTimeout);
+        if (isNaN(degradedTimeout) || degradedTimeout < 0) {
+          invalidFormMessage = "Degraded timeout must be a non-negative number (use 0 to disable DEGRADED status)";
+          return;
+        }
+        newMonitor.pingbackConfig.degradedTimeout = degradedTimeout;
+
+        // Validate relation: degradedTimeout < timeout (only if degradedTimeout > 0)
+        if (degradedTimeout > 0 && degradedTimeout >= timeout) {
+          invalidFormMessage = "Degraded timeout must be less than timeout";
+          return;
+        }
+      }
+      if (newMonitor.pingbackConfig.windowMode === "FIXED") {
+        
+        // Validate timeWindowStart (from HTML time input)
+        if (!newMonitor.pingbackConfig.timeWindowStart || 
+            newMonitor.pingbackConfig.timeWindowStart.trim() === "") {
+          invalidFormMessage = "Time window start is required for FIXED mode";
+          return;
+        }
+        
+        // HTML time input returns HH:MM format (e.g., "09:30" or "14:00")
+        // Validate format
+        if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowStart)) {
+          invalidFormMessage = "Time window start must be in HH:MM format";
+          return;
+        }
+        
+        // Validate timeWindowEnd (from HTML time input)
+        if (!newMonitor.pingbackConfig.timeWindowEnd || 
+            newMonitor.pingbackConfig.timeWindowEnd.trim() === "") {
+          invalidFormMessage = "Time window end is required for FIXED mode";
+          return;
+        }
+        
+        // Validate format
+        if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowEnd)) {
+          invalidFormMessage = "Time window end must be in HH:MM format";
+          return;
+        }
+        
+        // Parse times to validate they are valid time values
+        const [startHour, startMin] = newMonitor.pingbackConfig.timeWindowStart.split(":").map(Number);
+        const [endHour, endMin] = newMonitor.pingbackConfig.timeWindowEnd.split(":").map(Number);
+        
+        // Validate hour and minute ranges
+        if (startHour < 0 || startHour > 23 || startMin < 0 || startMin > 59) {
+          invalidFormMessage = "Time window start has invalid hour or minute values";
+          return;
+        }
+        
+        if (endHour < 0 || endHour > 23 || endMin < 0 || endMin > 59) {
+          invalidFormMessage = "Time window end has invalid hour or minute values";
+          return;
+        }
+        
+        // Validate that start < end (comparing as minutes from midnight)
+        const startMinutes = startHour * 60 + startMin;
+        const endMinutes = endHour * 60 + endMin;
+        
+        if (startMinutes >= endMinutes) {
+          invalidFormMessage = "Time window end must be after time window start";
+          return;
+        }
+
+        // Validate that cron executes during and after time window
+        const cronValidation = ValidateCronExecutionTimeWindow(
+          newMonitor.cron, 
+          newMonitor.pingbackConfig.timeWindowStart,
+          newMonitor.pingbackConfig.timeWindowEnd
+        );
+        
+        if (!cronValidation.valid) {
+          invalidFormMessage = cronValidation.error || "Invalid cron time window";
+          return;
+        }
+      }
+      // Validate degraded and up counters for SLIDING and FIXED window modes
+      if (/^(SLIDING|FIXED)$/i.test(newMonitor.pingbackConfig.windowMode)) {
+        
+        // Validate degradedCount (can be 0 to disable DEGRADED status)
+        if (newMonitor.pingbackConfig.degradedCount === undefined || 
+            newMonitor.pingbackConfig.degradedCount === null ||
+            newMonitor.pingbackConfig.degradedCount === "") {
+          invalidFormMessage = "Degraded count is required for " + newMonitor.pingbackConfig.windowMode + " mode";
+          return;
+        }
+
+        const degradedCount = Number(newMonitor.pingbackConfig.degradedCount);
+        if (isNaN(degradedCount) || degradedCount < 0 || !Number.isInteger(degradedCount)) {
+          invalidFormMessage = "Degraded count must be a non-negative integer (use 0 to disable DEGRADED status)";
+          return;
+        }
+        newMonitor.pingbackConfig.degradedCount = degradedCount;
+
+        // Validate upCount
+        if (newMonitor.pingbackConfig.upCount === undefined || 
+            newMonitor.pingbackConfig.upCount === null ||
+            newMonitor.pingbackConfig.upCount === "") {
+          invalidFormMessage = "UP count is required for " + newMonitor.pingbackConfig.windowMode + " mode";
+          return;
+        }
+
+        const upCount = Number(newMonitor.pingbackConfig.upCount);
+        if (isNaN(upCount) || upCount <= 0 || !Number.isInteger(upCount)) {
+          invalidFormMessage = "UP count must be a positive integer";
+          return;
+        }
+        newMonitor.pingbackConfig.upCount = upCount;
+
+        // Validate relation: degradedCount < upCount (only if degradedCount > 0)
+        if (degradedCount > 0 && degradedCount >= upCount) {
+          invalidFormMessage = "Degraded count must be less than UP count";
+          return;
+        }
+      }
       newMonitor.type_data = JSON.stringify(newMonitor.pingbackConfig);
     }
     formState = "loading";
@@ -1752,6 +1879,22 @@
               </Select.Root>
             </div>
           
+            {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}
+            <div class="col-span-2">
+            <Label for="pingbackTimeout">
+              Timeout
+            </Label><span class="text-red-500">*</span>
+            <Input bind:value={newMonitor.pingbackConfig.timeout} id="pingbackTimeout" />
+            </div>
+
+            <div class="col-span-2">
+            <Label for="pingbackDegradedTimeout">
+              Degraded Timeout
+            </Label><span class="text-red-500">*</span>
+            <Input bind:value={newMonitor.pingbackConfig.degradedTimeout} id="pingbackDegradedTimeout" />
+            </div>
+            {/if}
+
             {#if newMonitor.pingbackConfig.windowMode != "DYNAMIC"}
             <div class="w-36">
               <Label for="PingbackUpCount">UP count</Label><span class="text-red-500">*</span>
@@ -1786,19 +1929,17 @@
           {/if}
           </div>
 
-          
-
           <div class="col-span-1">
             <span class="text-xs text-muted-foreground"
-              >Refer to the
-              <a target="_blank" class="font-medium text-primary" href="https://kener.ing/docs/monitors-pingback">
-                documentation
-              </a> for more details.
-            </span>
-          </div>
-
-          {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}
-          <div class="col-span-6">
+            >Refer to the
+            <a target="_blank" class="font-medium text-primary" href="https://kener.ing/docs/monitors-pingback">
+              documentation
+            </a> for more details.
+          </span>
+        </div>
+        
+        {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}      
+          <div class="col-span-6 mt-4">
             <Label for="PingbackEvals">Pingback dynamic eval</Label>
             <p class="my-1 text-xs text-muted-foreground">
               You can write a custom eval function to evaluate the payload sent. The function should return a promise that

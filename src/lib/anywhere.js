@@ -201,8 +201,8 @@ export const DefaultRemoteFilesEval = `(async function(connectionTime, listingTi
 	}
 })`;
 
-export const DefaultPingbackEval = `(async function(req){
-  //const {headers, query, body} = req;
+export const DefaultPingbackEval = `(async function(req, default_status){
+  const {method, headers, query, body} = req;
 	return {
 		status: 'UP',
 		latency: 0,

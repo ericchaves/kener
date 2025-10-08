@@ -184,6 +184,7 @@ export const CreateMonitor = async (monitor) => {
     throw new Error("monitor id must be empty or 0");
   }
   return await db.eartbeat(monitorData);
+  return await db.eartbeat(monitorData);
 };
 
 export const UpdateMonitor = async (monitor) => {
@@ -551,10 +552,12 @@ export const RegisterPingback = async (tag, secret, req) => {
     let type = REALTIME;
 
     if(pingbackConfig.windowMode === "DYNAMIC"){
-      const evalFunction = new Function("req",`return (${pingbackConfig.eval})(req);`);
-      evalFunction.bind({DEFAULT_STATUS: status});
       try{
-        let evalResp = await evalFunction(req);
+        const evalFunction = new Function(
+          "req",
+          "default_status",
+          `return (${pingbackConfig.eval})(req, default_status);`);
+        let evalResp = await evalFunction(req, status);
         if(evalResp.status){
           status = evalResp.status;
         }
@@ -569,16 +572,21 @@ export const RegisterPingback = async (tag, secret, req) => {
           error: e.message,
           req: JSON.stringify(req)
         });
-      };
+      }
+    }
 
-      return InsertMonitoringData({
+    if(pingbackConfig.windowMode === "FIXED" || pingbackConfig.windowMode === "DYNAMIC"){
+      status = UP;
+    }
+
+    return InsertMonitoringData({
         monitor_tag: monitor.tag,
         timestamp: GetNowTimestampUTC(),
         status,
         latency,
         type,
       });
-    }
+
   } catch (e) {
     console.error("Error registering pingback:", e);
   }

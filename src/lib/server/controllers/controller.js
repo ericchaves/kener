@@ -562,20 +562,19 @@ export const RegisterPingback = async (tag, secret, req) => {
           status = evalResp.status;
         }
         if(!isNaN(parseInt(evalResp.latency))){
-          latency = parseInt(evalResp.latency);
+          latency = Math.abs(parseInt(evalResp.latency));
         }
       }catch(e){
-        status = DOWN;
-        type = ERROR;
         console.error("Error evaluating pingback:", {
           config: pingbackConfig.eval,
           error: e.message,
           req: JSON.stringify(req)
         });
+        return null;
       }
     }
 
-    if(pingbackConfig.windowMode === "FIXED" || pingbackConfig.windowMode === "DYNAMIC"){
+    if(pingbackConfig.windowMode === "FIXED" || pingbackConfig.windowMode === "SLIDING"){
       status = UP;
     }
 

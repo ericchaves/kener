@@ -36,8 +36,20 @@ class PingbackCall {
       const nowInSeconds = GetNowTimestampUTC();
       let pingbacks = 0;
 
-      // DYNAMIC uses the result of the last pingback
+      // DYNAMIC
       if(window_mode === "DYNAMIC"){
+        const todayInSeconds = GetDayStartTimestampUTC(nowInSeconds);
+
+        // Reset to default status if last pingback was from a previous day
+        if(latestData.timestamp < todayInSeconds){
+          return {
+            status: this.monitor.default_status,
+            latency: 0,
+            type: REALTIME,
+          };
+        }
+
+        // Use status from today's last pingback
         return {
           status: latestData.type === ERROR ? DOWN : latestData.status,
           latency: 0,

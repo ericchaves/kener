@@ -354,6 +354,7 @@ export {
   GetMinuteStartTimestampUTC,
   GetNowTimestampUTC,
   GetDayStartTimestampUTC,
+  GetDayEndTimestampUTC,
   GetMinuteStartNowTimestampUTC,
   DurationInMinutes,
   GetDayStartWithOffset,

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { UP, DOWN, DEGRADED, REALTIME, TIMEOUT, ERROR, MANUAL, NO_DATA } from "../constants.js";
-import { GetNowTimestampUTC } from "../tool.js";
+import { GetNowTimestampUTC, GetDayEndTimestampUTC, GetDayStartTimestampUTC } from "../tool.js";
 import { GetLastHeartbeat, CountPingbacks } from "../controllers/controller.js";
 import Cron from "croner";
 
@@ -22,14 +22,14 @@ class PingbackCall {
         };
       }
 
-      const { degradedCount, upCount, timeWindowStart, timeWindowEnd, window_mode } = this.monitor.type_data;
+      const { degradedCount, upCount, timeWindowStart, timeWindowEnd, windowMode } = this.monitor.type_data;
 
       // Validações
-      if (!window_mode) {
+      if (!windowMode) {
         throw new Error("window_mode is required");
       }
 
-      if (upCount === undefined || degradedCount === undefined) {
+      if (/FIXED|SLIDING/.test(windowMode) && upCount === undefined || degradedCount === undefined) {
         throw new Error("upCount and degradedCount are required");
       }
 
@@ -37,7 +37,7 @@ class PingbackCall {
       let pingbacks = 0;
 
       // DYNAMIC
-      if(window_mode === "DYNAMIC"){
+      if(windowMode === "DYNAMIC"){
         const todayInSeconds = GetDayStartTimestampUTC(nowInSeconds);
 
         // Reset to default status if last pingback was from a previous day
@@ -49,23 +49,27 @@ class PingbackCall {
           };
         }
 
+        let finalStatus = latestData.status;
+        if (latestData.status === UP && latestData.latency > 0) {
+          const { degradedTimeout, timeout } = this.monitor.type_data;
+
+          if (latency >= timeout) {
+            finalStatus = DOWN;
+          } else if (latency >= degradedTimeout) {
+            finalStatus = DEGRADED;
+          }
+        }
+
         // Use status from today's last pingback
         return {
-          status: latestData.type === ERROR ? DOWN : latestData.status,
-          latency: 0,
+          status: finalStatus,
+          latency: latestData.latency,
           type: latestData.type === ERROR ? ERROR : REALTIME,
         };
       }
 
-      // Helper: Get end of current day in seconds
-      const getEndOfDayInSeconds = () => {
-        let endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
-        return Math.floor(endOfDay.getTime() / 1000);
-      };
-
       // FIXED window count pingbacks only in specific time window
-      if(window_mode === "FIXED"){
+      if(windowMode === "FIXED"){
         if (!timeWindowStart || !timeWindowEnd) {
           throw new Error("timeWindowStart and timeWindowEnd are required for FIXED mode");
         }
@@ -80,9 +84,8 @@ class PingbackCall {
         endDate.setMinutes(parseInt(timeWindowEnd.split(":")[1]));
         endDate.setSeconds(0);
 
-        const currentDate = new Date();
-
         // Se ainda não passou da hora de fim, retorna status padrão
+        const currentDate = new Date();
         if (currentDate <= endDate) {
           return {
             status: this.monitor.default_status,
@@ -92,22 +95,22 @@ class PingbackCall {
         }
 
         // Limita a contagem até o final do dia atual
-        const endOfDayInSeconds = getEndOfDayInSeconds();
-        const previousInSeconds = Math.floor(startDate.getTime() / 1000);
+        const endOfDayInSeconds = GetDayEndTimestampUTC();
+        const windowStartInSeconds = Math.floor(startDate.getTime() / 1000);
         const countUntil = Math.min(nowInSeconds, endOfDayInSeconds);
 
-        pingbacks = await CountPingbacks(this.monitor.tag, previousInSeconds, countUntil);
+        pingbacks = await CountPingbacks(this.monitor.tag, windowStartInSeconds, countUntil);
       }
 
       // SLIDING window count pingbacks for each cron execution
-      if(window_mode === "SLIDING"){
+      if(windowMode === "SLIDING"){
         // Use croner to calculate expected heartbeat time
         const cronJob = Cron(this.monitor.cron);
         const prevDate = cronJob.previousRun();
         const previousInSeconds = Math.floor(prevDate.getTime() / 1000);
 
         // Limita a contagem até o final do dia atual
-        const endOfDayInSeconds = getEndOfDayInSeconds();
+        const endOfDayInSeconds = GetDayEndTimestampUTC();
         const countUntil = Math.min(nowInSeconds, endOfDayInSeconds);
 
         pingbacks = await CountPingbacks(this.monitor.tag, previousInSeconds, countUntil);

@@ -549,7 +549,7 @@ export const RegisterPingback = async (tag, secret, req) => {
 
     let status = monitor.default_status;
     let latency = 0;
-    let type = REALTIME;
+    let type = SIGNAL;
 
     if(pingbackConfig.windowMode === "DYNAMIC"){
       try{
@@ -558,9 +558,10 @@ export const RegisterPingback = async (tag, secret, req) => {
           "default_status",
           `return (${pingbackConfig.eval})(req, default_status);`);
         let evalResp = await evalFunction(req, status);
-        if(evalResp.status){
-          status = evalResp.status;
+        if(!/UP|DOWN|DEGRADED/.test(evalResp.status)){
+          throw new Error(`Invalid eval function status: ${evalResp.status}`);
         }
+        status = evalResp.status;
         if(!isNaN(parseInt(evalResp.latency))){
           latency = Math.abs(parseInt(evalResp.latency));
         }

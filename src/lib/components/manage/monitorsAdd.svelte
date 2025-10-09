@@ -152,6 +152,8 @@
         secrets: [],
       },
       pingbackConfig: {
+        timeout: 1000,
+        degradedTimeout: 500,
         upCount: 3,
         degradedCount: 1,
         timeWindowStart: "07:00",

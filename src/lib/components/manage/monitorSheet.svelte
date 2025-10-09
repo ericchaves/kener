@@ -508,6 +508,56 @@
         return;
       }
 
+      if(newMonitor.pingbackConfig.windowMode === "DYNAMIC"){
+        
+        // validate eval function
+        newMonitor.pingbackConfig.eval = newMonitor.pingbackConfig.eval?.trim() || "";
+        
+        if (!newMonitor.pingbackConfig.eval) {
+          invalidFormMessage = "Eval function is required for DYNAMIC mode";
+          return;
+        }
+
+        if (!(await isValidEval(newMonitor.pingbackConfig.eval))) {
+          invalidFormMessage = invalidFormMessage + ". Invalid eval function";
+          return;
+        }
+
+        // validate timeout (OBRIGATÓRIO)
+        if (!newMonitor.pingbackConfig.timeout || 
+            newMonitor.pingbackConfig.timeout === "") {
+          invalidFormMessage = "Timeout is required for DYNAMIC mode";
+          return;
+        }
+
+        const timeout = Number(newMonitor.pingbackConfig.timeout);
+        console.log('timeout: ', timeout);
+        if (isNaN(timeout) || timeout <= 0) {
+          invalidFormMessage = "Timeout must be a positive number";
+          return;
+        }
+        newMonitor.pingbackConfig.timeout = timeout;
+
+        // Validar degradedTimeout (OBRIGATÓRIO)
+        if (!newMonitor.pingbackConfig.degradedTimeout || 
+            newMonitor.pingbackConfig.degradedTimeout === "") {
+          invalidFormMessage = "Degraded timeout is required for DYNAMIC mode";
+          return;
+        }
+
+        const degradedTimeout = Number(newMonitor.pingbackConfig.degradedTimeout);
+        if (isNaN(degradedTimeout) || degradedTimeout <= 0) {
+          invalidFormMessage = "Degraded timeout must be a positive number";
+          return;
+        }
+        newMonitor.pingbackConfig.degradedTimeout = degradedTimeout;
+
+        // Validar relação: degradedTimeout < timeout
+        if (degradedTimeout >= timeout) {
+          invalidFormMessage = "Degraded timeout must be less than timeout";
+          return;
+        }
+      }
       if(newMonitor.pingbackConfig.windowMode === "FIXED"){
         if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowStart)) {
           invalidFormMessage = "Time window start should be in HH:MM format";
@@ -530,7 +580,7 @@
       }
 
       // validate down and downgraded counters for sliding and fixed window mode
-      if(newMonitor.pingbackConfig.windowMode !== "DYNAMIC"){
+      if(/^SLIDING|FIXED$/.test(newMonitor.pingbackConfig.windowMode)){
         if (!!!newMonitor.pingbackConfig.degradedCount || isNaN(newMonitor.pingbackConfig.degradedCount)) {
           invalidFormMessage = "Degraded count must be a number";
           return;
@@ -1752,6 +1802,22 @@
               </Select.Root>
             </div>
           
+            {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}
+            <div class="col-span-2">
+            <Label for="pingbackTimeout">
+              Timeout
+            </Label><span class="text-red-500">*</span>
+            <Input bind:value={newMonitor.pingbackConfig.timeout} id="pingbackTimeout" />
+            </div>
+
+            <div class="col-span-2">
+            <Label for="pingbackDegradedTimeout">
+              Degraded Timeout
+            </Label><span class="text-red-500">*</span>
+            <Input bind:value={newMonitor.pingbackConfig.degradedTimeout} id="pingbackDegradedTimeout" />
+            </div>
+            {/if}
+
             {#if newMonitor.pingbackConfig.windowMode != "DYNAMIC"}
             <div class="w-36">
               <Label for="PingbackUpCount">UP count</Label><span class="text-red-500">*</span>
@@ -1786,19 +1852,17 @@
           {/if}
           </div>
 
-          
-
           <div class="col-span-1">
             <span class="text-xs text-muted-foreground"
-              >Refer to the
-              <a target="_blank" class="font-medium text-primary" href="https://kener.ing/docs/monitors-pingback">
-                documentation
-              </a> for more details.
-            </span>
-          </div>
-
-          {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}
-          <div class="col-span-6">
+            >Refer to the
+            <a target="_blank" class="font-medium text-primary" href="https://kener.ing/docs/monitors-pingback">
+              documentation
+            </a> for more details.
+          </span>
+        </div>
+        
+        {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}      
+          <div class="col-span-6 mt-4">
             <Label for="PingbackEvals">Pingback dynamic eval</Label>
             <p class="my-1 text-xs text-muted-foreground">
               You can write a custom eval function to evaluate the payload sent. The function should return a promise that

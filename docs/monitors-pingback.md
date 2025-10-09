@@ -56,28 +56,52 @@ If the pingback count is lower than `DEGRADED count`, the service is considered 
 In `dynamic` mode, you must define an eval function that will be invoked each time you call the `pingback` to determine the status of the signal (either UP, DOWN, or DEGRADED).
 When the monitor executes, it will assume the status value of the last pingback invocation.
 
-### Eval
-
 The eval function receives a `request` argument with the `method`, `headers`, `query` (query strings), and `body` properties.
 
+**Timeout Configuration (Required):**
+
+- `timeout`: Maximum acceptable latency in milliseconds. If exceeded, the service is considered DOWN.
+- `degradedTimeout`: Latency threshold in milliseconds. If exceeded (but below timeout), the service is considered DEGRADED.
+- `degradedTimeout` must be less than `timeout`.
+
+**Latency Evaluation:**
+
+When the eval function returns status UP with a non-zero latency, the latency is evaluated against the timeout thresholds:
+
+- If `latency >= timeout`: final status is DOWN
+- If `degradedTimeout <= latency < timeout`: final status is DEGRADED  
+- If `latency < degradedTimeout`: final status remains UP
+- If `latency = 0`: timeout rules are ignored and status remains as returned by eval
+
+When the eval function returns status DOWN or DEGRADED, the latency is not evaluated and the returned status is used directly.
+
 **Important considerations for the eval function:**
+
 - The eval function **must always be declared as an async function**.
-- If the eval function throws an exception, the pingback will be discarted to prevent flooding the monitor with invalid signals.
+- If the eval function throws an exception, the pingback will be automatically registered with status DOWN.
 - The latency value returned by the eval function is always stored as a positive number. Negative values are converted to their absolute value.
+- To ignore latency-based status evaluation, return `latency: 0`.
 
 **Eval function example:**
 ```javascript
 async (req, default_status) => {
+  const startTime = Date.now();
+  
   // Check if request has valid authentication
   if (req.headers['x-api-key'] !== 'expected-key') {
     return { status: 'DOWN', latency: 0 };
   }
   
+  // Simulate processing time
+  const processingTime = Date.now() - startTime;
+  
   // Check body content
   if (req.body?.health === 'ok') {
-    return { status: 'UP', latency: req.body.response_time || 0 };
+    // Return UP with latency for timeout evaluation
+    return { status: 'UP', latency: req.body.response_time || processingTime };
   }
   
-  return { status: 'DEGRADED', latency: 100 };
+  // Return DEGRADED without latency evaluation
+  return { status: 'DEGRADED', latency: 0 };
 }
 ```

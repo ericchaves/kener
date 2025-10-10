@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { base } from "$app/paths";
+import Cron from 'croner';
+
 function siteDataExtractFromDb(data, obj) {
   let requestedObject = { ...obj };
   for (const key in requestedObject) {
@@ -290,6 +292,115 @@ function GetGameFromId(list, id) {
   return list.find((game) => game.id === id);
 }
 
+/**
+ * Validates if a cron expression executes at least once during the time window
+ * AND at least once after the time window end on the same day.
+ *
+ * @param {string} cronExpression - The cron expression to validate (e.g., "15/2 21-22 * * 1-5")
+ * @param {string} timeWindowStart - Start time in HH:MM format (e.g., "21:00")
+ * @param {string} timeWindowEnd - End time in HH:MM format (e.g., "22:00")
+ * @returns {{valid: boolean, error: string|null}} Validation result with error message if invalid
+ *
+ * @example
+ * // Returns {valid: true, error: null}
+ * // Executes during window (21:15, 21:17...) and after (22:15, 22:17...)
+ * ValidateCronExecutionTimeWindow("15/2 21-22 * * 1-5", "21:00", "22:00")
+ *
+ * @example
+ * // Returns {valid: false, error: "..."}
+ * // Only executes at 20:00 (before window)
+ * ValidateCronExecutionTimeWindow("0 20 * * *", "21:00", "22:00")
+ */
+function ValidateCronExecutionTimeWindow(cronExpression, timeWindowStart, timeWindowEnd) {
+  try {
+    // Create cron job instance
+    const cronJob = Cron(cronExpression);
+
+    // Get today's date as reference
+    const today = new Date();
+
+    // Parse window start time (HH:MM format)
+    const [startHour, startMin] = timeWindowStart.split(':').map(Number);
+
+    // Parse window end time (HH:MM format)
+    const [endHour, endMin] = timeWindowEnd.split(':').map(Number);
+
+    // Create Date object for window start time today
+    const windowStart = new Date(today);
+    windowStart.setHours(startHour, startMin, 0, 0);
+
+    // Create Date object for window end time today
+    const windowEnd = new Date(today);
+    windowEnd.setHours(endHour, endMin, 0, 0);
+
+    // Create Date object for end of day (23:59:59.999)
+    const endOfDay = new Date(today);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Validate window times
+    if (windowEnd <= windowStart) {
+      return {
+        valid: false,
+        error: "Time window end must be after time window start"
+      };
+    }
+
+    // Check 1: Cron executes at least once DURING the time window
+    const nextRunDuringWindow = cronJob.nextRun(windowStart);
+
+    if (!nextRunDuringWindow) {
+      return {
+        valid: false,
+        error: `Cron does not execute after ${timeWindowEnd}`
+      };
+    }
+
+    const executesDuringWindow = nextRunDuringWindow >= windowStart &&
+                                 nextRunDuringWindow < windowEnd;
+
+    if (!executesDuringWindow) {
+      return {
+        valid: false,
+        error: "Cron must execute at least once between time window start and end"
+      };
+    }
+
+    // Check 2: Cron executes at least once AFTER the time window end
+    const nextRunAfterWindow = cronJob.nextRun(windowEnd);
+
+    if (!nextRunAfterWindow) {
+      return {
+        valid: false,
+        error: "Cron must execute at least once after the time window end"
+      };
+    }
+
+    const executesAfterWindow = nextRunAfterWindow > windowEnd &&
+                                nextRunAfterWindow <= endOfDay;
+
+    if (!executesAfterWindow) {
+      return {
+        valid: false,
+        error: "Cron must execute at least once after the time window end on the same day"
+      };
+    }
+
+    // All validations passed
+    return {
+      valid: true,
+      error: null
+    };
+
+  } catch (e) {
+    // Log error and return false for invalid cron expressions
+    console.error('Error validating cron execution:', e);
+    return {
+      valid: false,
+      error: `Invalid cron expression: ${e.message}`
+    };
+  }
+}
+
 export {
   siteDataExtractFromDb,
   storeSiteData,
@@ -300,6 +411,7 @@ export {
   IsValidURL,
   IsValidPort,
   ValidateCronExpression,
+  ValidateCronExecutionTimeWindow,
   SortMonitor,
   RandomString,
   GetGameFromId,

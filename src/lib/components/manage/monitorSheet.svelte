@@ -24,6 +24,7 @@
     allRecordTypes,
     ValidateIpAddress,
     ValidateCronExpression,
+    ValidateCronExecutionTimeWindow,
     IsValidHost,
     IsValidNameServer,
     GetGameFromId,
@@ -502,15 +503,23 @@
       newMonitor.type_data = JSON.stringify(newMonitor.remotefilesConfig);
     } else if (newMonitor.monitor_type === "PINGBACK") {
 
-      // validate monitor window mode
-      if (!/^SLIDING|DYNAMIC|FIXED$/ig.test(newMonitor.pingbackConfig.windowMode)) {
-        invalidFormMessage = "Window mode is required";
+      // Validate monitor window mode
+      if (!newMonitor.pingbackConfig.windowMode || 
+          !/^(SLIDING|DYNAMIC|FIXED)$/i.test(newMonitor.pingbackConfig.windowMode)) {
+        invalidFormMessage = "Window mode is required and must be SLIDING, DYNAMIC, or FIXED";
         return;
       }
 
-      if(newMonitor.pingbackConfig.windowMode === "DYNAMIC"){
+      // Validate secret string (required for all modes)
+      if (!newMonitor.pingbackConfig.secretString || 
+          newMonitor.pingbackConfig.secretString.trim() === "") {
+        invalidFormMessage = "Secret string is required";
+        return;
+      }
+
+      if (newMonitor.pingbackConfig.windowMode === "DYNAMIC") {
         
-        // validate eval function
+        // Validate eval function
         newMonitor.pingbackConfig.eval = newMonitor.pingbackConfig.eval?.trim() || "";
         
         if (!newMonitor.pingbackConfig.eval) {
@@ -523,7 +532,7 @@
           return;
         }
 
-        // validate timeout (OBRIGATÓRIO)
+        // Validate timeout (REQUIRED)
         if (!newMonitor.pingbackConfig.timeout || 
             newMonitor.pingbackConfig.timeout === "") {
           invalidFormMessage = "Timeout is required for DYNAMIC mode";
@@ -531,14 +540,13 @@
         }
 
         const timeout = Number(newMonitor.pingbackConfig.timeout);
-        console.log('timeout: ', timeout);
         if (isNaN(timeout) || timeout <= 0) {
           invalidFormMessage = "Timeout must be a positive number";
           return;
         }
         newMonitor.pingbackConfig.timeout = timeout;
 
-        // Validar degradedTimeout (OBRIGATÓRIO)
+        // Validate degradedTimeout (REQUIRED)
         if (!newMonitor.pingbackConfig.degradedTimeout || 
             newMonitor.pingbackConfig.degradedTimeout === "") {
           invalidFormMessage = "Degraded timeout is required for DYNAMIC mode";
@@ -552,42 +560,113 @@
         }
         newMonitor.pingbackConfig.degradedTimeout = degradedTimeout;
 
-        // Validar relação: degradedTimeout < timeout
+        // Validate relation: degradedTimeout < timeout
         if (degradedTimeout >= timeout) {
           invalidFormMessage = "Degraded timeout must be less than timeout";
           return;
         }
       }
-      if(newMonitor.pingbackConfig.windowMode === "FIXED"){
+
+      if (newMonitor.pingbackConfig.windowMode === "FIXED") {
+        
+        // Validate timeWindowStart (from HTML time input)
+        if (!newMonitor.pingbackConfig.timeWindowStart || 
+            newMonitor.pingbackConfig.timeWindowStart.trim() === "") {
+          invalidFormMessage = "Time window start is required for FIXED mode";
+          return;
+        }
+        
+        // HTML time input returns HH:MM format (e.g., "09:30" or "14:00")
+        // Validate format
         if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowStart)) {
-          invalidFormMessage = "Time window start should be in HH:MM format";
+          invalidFormMessage = "Time window start must be in HH:MM format";
           return;
         }
+        
+        // Validate timeWindowEnd (from HTML time input)
+        if (!newMonitor.pingbackConfig.timeWindowEnd || 
+            newMonitor.pingbackConfig.timeWindowEnd.trim() === "") {
+          invalidFormMessage = "Time window end is required for FIXED mode";
+          return;
+        }
+        
+        // Validate format
         if (!/^\d{2}:\d{2}$/.test(newMonitor.pingbackConfig.timeWindowEnd)) {
-          invalidFormMessage = "Time window end should be in HH:MM format";
+          invalidFormMessage = "Time window end must be in HH:MM format";
           return;
         }
-        let starTime = new Date();
-        starTime.setHours(parseInt(newMonitor.pingbackConfig.timeWindowStart.split(":")[0]));
-        starTime.setMinutes(parseInt(newMonitor.pingbackConfig.timeWindowStart.split(":")[1]));
-        let endTime = new Date();
-        endTime.setHours(parseInt(newMonitor.pingbackConfig.timeWindowEnd.split(":")[0]));
-        endTime.setMinutes(parseInt(newMonitor.pingbackConfig.timeWindowEnd.split(":")[1]));
-        if (starTime > endTime) {
-          invalidFormMessage = "Time window start should be less than time window end";
+        
+        // Parse times to validate they are valid time values
+        const [startHour, startMin] = newMonitor.pingbackConfig.timeWindowStart.split(":").map(Number);
+        const [endHour, endMin] = newMonitor.pingbackConfig.timeWindowEnd.split(":").map(Number);
+        
+        // Validate hour and minute ranges
+        if (startHour < 0 || startHour > 23 || startMin < 0 || startMin > 59) {
+          invalidFormMessage = "Time window start has invalid hour or minute values";
+          return;
+        }
+        
+        if (endHour < 0 || endHour > 23 || endMin < 0 || endMin > 59) {
+          invalidFormMessage = "Time window end has invalid hour or minute values";
+          return;
+        }
+        
+        // Validate that start < end (comparing as minutes from midnight)
+        const startMinutes = startHour * 60 + startMin;
+        const endMinutes = endHour * 60 + endMin;
+        
+        if (startMinutes >= endMinutes) {
+          invalidFormMessage = "Time window end must be after time window start";
+          return;
+        }
+
+        // Validate that cron executes during and after time window
+        const cronValidation = ValidateCronExecutionTimeWindow(
+          newMonitor.cron, 
+          newMonitor.pingbackConfig.timeWindowStart,
+          newMonitor.pingbackConfig.timeWindowEnd
+        );
+        
+        if (!cronValidation.valid) {
+          invalidFormMessage = cronValidation.error || "Invalid cron time window";
           return;
         }
       }
 
-      // validate down and downgraded counters for sliding and fixed window mode
-      if(/^SLIDING|FIXED$/.test(newMonitor.pingbackConfig.windowMode)){
-        if (!!!newMonitor.pingbackConfig.degradedCount || isNaN(newMonitor.pingbackConfig.degradedCount)) {
-          invalidFormMessage = "Degraded count must be a number";
+      // Validate degraded and up counters for SLIDING and FIXED window modes
+      if (/^(SLIDING|FIXED)$/i.test(newMonitor.pingbackConfig.windowMode)) {
+        
+        // Validate degradedCount
+        if (!newMonitor.pingbackConfig.degradedCount || 
+            newMonitor.pingbackConfig.degradedCount === "") {
+          invalidFormMessage = "Degraded count is required for " + newMonitor.pingbackConfig.windowMode + " mode";
           return;
         }
 
-        if (!!!newMonitor.pingbackConfig.upCount || isNaN(newMonitor.pingbackConfig.upCount)) {
-          invalidFormMessage = "Up count must be a number";
+        const degradedCount = Number(newMonitor.pingbackConfig.degradedCount);
+        if (isNaN(degradedCount) || degradedCount < 0 || !Number.isInteger(degradedCount)) {
+          invalidFormMessage = "Degraded count must be a non-negative integer";
+          return;
+        }
+        newMonitor.pingbackConfig.degradedCount = degradedCount;
+
+        // Validate upCount
+        if (!newMonitor.pingbackConfig.upCount || 
+            newMonitor.pingbackConfig.upCount === "") {
+          invalidFormMessage = "UP count is required for " + newMonitor.pingbackConfig.windowMode + " mode";
+          return;
+        }
+
+        const upCount = Number(newMonitor.pingbackConfig.upCount);
+        if (isNaN(upCount) || upCount <= 0 || !Number.isInteger(upCount)) {
+          invalidFormMessage = "UP count must be a positive integer";
+          return;
+        }
+        newMonitor.pingbackConfig.upCount = upCount;
+
+        // Validate relation: degradedCount < upCount
+        if (degradedCount >= upCount) {
+          invalidFormMessage = "Degraded count must be less than UP count";
           return;
         }
       }

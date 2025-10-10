@@ -36,25 +36,38 @@ This is a standard cron expression that defines how often Kener will run this mo
 ### Sliding window mode
 
 In `sliding` mode, Kener will count the number of UP pingbacks received between the last execution and now (within the current day only).
-If the pingback count is equal to or greater than `UP count`, the service is considered up and healthy.
-If the pingback count is lower than `UP count` but greater than or equal to `DEGRADED count`, the service is considered degraded.
-If the pingback count is lower than `DEGRADED count`, the service is considered down.
+
+- If the pingback count is equal to or greater than `UP count`, the service is considered **UP**.
+- If the pingback count is lower than `UP count` but greater than or equal to `DEGRADED count`, the service is considered **DEGRADED**.
+- If the pingback count is lower than `DEGRADED count`, the service is considered **DOWN**.
 
 ### Fixed window mode
 
 In `fixed` mode, Kener counts UP pingbacks received from the `time window start` until the current execution time, but only until the end of the current day.
 
-When the monitor executes before `time window end`, pingbacks are not counted and the monitor's default status is used to report the service status.
+**Monitor behavior based on execution time:**
 
-When the monitor executes after `time window end`, pingbacks are counted from `time window start` until now (limited to the end of the current day).
-If the pingback count is equal to or greater than `UP count`, the service is considered up and healthy.
-If the pingback count is lower than `UP count` but greater than or equal to `DEGRADED count`, the service is considered degraded.
-If the pingback count is lower than `DEGRADED count`, the service is considered down.
+1. **Before time window start**: The monitor returns the default status without counting pingbacks.
+
+2. **Between time window start and end**: Pingbacks are counted from `time window start` until now.
+   - If the pingback count is equal to or greater than `UP count`, the service is considered **UP**.
+   - Otherwise, the monitor returns the default status. The service is **not** marked as DEGRADED or DOWN during this period.
+
+3. **After time window end**: Pingbacks are counted from `time window start` until now (limited to the end of the current day).
+   - If the pingback count is equal to or greater than `UP count`, the service is considered **UP**.
+   - If the pingback count is lower than `UP count` but greater than or equal to `DEGRADED count`, the service is considered **DEGRADED**.
+   - If the pingback count is lower than `DEGRADED count`, the service is considered **DOWN**.
+
+**Cron expression requirements for FIXED mode:**
+- The cron expression must schedule at least one execution **during** the time window (between start and end).
+- The cron expression must schedule at least one execution **after** the time window end on the same day.
 
 ### Dynamic window mode
 
 In `dynamic` mode, you must define an eval function that will be invoked each time you call the `pingback` to determine the status of the signal (either UP, DOWN, or DEGRADED).
-When the monitor executes, it will assume the status value of the last pingback invocation.
+When the monitor executes, it will assume the status value of the last pingback invocation from the current day.
+
+If the last pingback was from a previous day, the monitor returns the default status.
 
 The eval function receives a `request` argument with the `method`, `headers`, `query` (query strings), and `body` properties.
 
@@ -68,9 +81,9 @@ The eval function receives a `request` argument with the `method`, `headers`, `q
 
 When the eval function returns status UP with a non-zero latency, the latency is evaluated against the timeout thresholds:
 
-- If `latency >= timeout`: final status is DOWN
-- If `degradedTimeout <= latency < timeout`: final status is DEGRADED  
-- If `latency < degradedTimeout`: final status remains UP
+- If `latency >= timeout`: final status is **DOWN**
+- If `degradedTimeout <= latency < timeout`: final status is **DEGRADED**
+- If `latency < degradedTimeout`: final status remains **UP**
 - If `latency = 0`: timeout rules are ignored and status remains as returned by eval
 
 When the eval function returns status DOWN or DEGRADED, the latency is not evaluated and the returned status is used directly.
@@ -87,11 +100,12 @@ When the eval function returns status DOWN or DEGRADED, the latency is not evalu
 async (req, default_status) => {
   const startTime = Date.now();
   
-  // Check if request has valid authentication
-  if (req.headers['x-api-key'] !== 'expected-key') {
+  // Check health status
+  if (req.body?.health !== 'ok') {
+    // Return DOWN without latency evaluation
     return { status: 'DOWN', latency: 0 };
   }
-  
+
   // Simulate processing time
   const processingTime = Date.now() - startTime;
   

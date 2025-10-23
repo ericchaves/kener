@@ -503,9 +503,9 @@
       newMonitor.type_data = JSON.stringify(newMonitor.remotefilesConfig);
     } else if (newMonitor.monitor_type === "PINGBACK") {
       // Validate monitor window mode
-      if (!newMonitor.pingbackConfig.windowMode || 
-          !/^(SLIDING|DYNAMIC|FIXED)$/i.test(newMonitor.pingbackConfig.windowMode)) {
-        invalidFormMessage = "Window mode is required and must be SLIDING, DYNAMIC, or FIXED";
+      if (!newMonitor.pingbackConfig.windowMode ||
+          !/^(SLIDING|DYNAMIC|FIXED|CUMULATIVE)$/i.test(newMonitor.pingbackConfig.windowMode)) {
+        invalidFormMessage = "Window mode is required and must be SLIDING, DYNAMIC, FIXED, or CUMULATIVE";
         return;
       }
       // Validate secret string (required for all modes)
@@ -630,8 +630,8 @@
           return;
         }
       }
-      // Validate degraded and up counters for SLIDING and FIXED window modes
-      if (/^(SLIDING|FIXED)$/i.test(newMonitor.pingbackConfig.windowMode)) {
+      // Validate degraded and up counters for SLIDING, FIXED and CUMULATIVE window modes
+      if (/^(SLIDING|FIXED|CUMULATIVE)$/i.test(newMonitor.pingbackConfig.windowMode)) {
         
         // Validate degradedCount (can be 0 to disable DEGRADED status)
         if (newMonitor.pingbackConfig.degradedCount === undefined || 
@@ -703,7 +703,8 @@
   let pingbackWindowModes = {
     DYNAMIC: "dynamic",
     SLIDING: "sliding",
-    FIXED: "fixed"
+    FIXED: "fixed",
+    CUMULATIVE: "cumulative"
   };
  
   
@@ -1870,6 +1871,9 @@
                     </Select.Item>
                     <Select.Item value="FIXED" label={pingbackWindowModes.FIXED}  class="text-sm font-medium">
                       {pingbackWindowModes.FIXED}
+                    </Select.Item>
+                    <Select.Item value="CUMULATIVE" label={pingbackWindowModes.CUMULATIVE} class="text-sm font-medium">
+                      {pingbackWindowModes.CUMULATIVE}
                     </Select.Item>
                     <Select.Item value="DYNAMIC" label={pingbackWindowModes.DYNAMIC} class="text-sm font-medium">
                       {pingbackWindowModes.DYNAMIC}

@@ -99,15 +99,21 @@ class DbImpl {
       .first();
   }
 
-  // count pusbacks signals between two timestamps
-  async countPingbacks(monitor_tag, minTimestamp, timestamp, status="UP"){
-    const result = await this.knex("monitoring_data")
+  // count pingbacks by status between two timestamps
+  async countPingbacksByStatus(monitor_tag, minTimestamp, maxTimestamp) {
+    const results = await this.knex("monitoring_data")
+      .select("status")
+      .count("* as count")
       .where("monitor_tag", monitor_tag)
       .where("type", SIGNAL)
-      .where("status", status)
-      .whereBetween("timestamp", [minTimestamp, timestamp])
-      .count('* as count').first();
-      return result.count;
+      .whereBetween("timestamp", [minTimestamp, maxTimestamp])
+      .groupBy("status");
+
+    return {
+      UP: parseInt(results.find(r => r.status === "UP")?.count || 0),
+      DOWN: parseInt(results.find(r => r.status === "DOWN")?.count || 0),
+      DEGRADED: parseInt(results.find(r => r.status === "DEGRADED")?.count || 0)
+    };
   }
 
   //given monitor_tag, start and end timestamp in utc seconds return total degraded, up, down, avg(latency), max(latency), min(latency)

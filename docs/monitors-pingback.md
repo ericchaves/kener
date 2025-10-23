@@ -5,13 +5,18 @@ description: Monitor services that send periodic signals (pingbacks) to Kener.
 
 # Pingback Monitors
 
-Pingback monitors are designed for services that actively report their status to Kener, instead of Kener polling them. 
-Services are expected to send a number of signals by calling a pingback URL within a given time window to report they are up and running.
+Pingback monitors are designed for services that actively report their status to Kener, instead of Kener polling them.
+Services can send signals with status UP, DOWN, or DEGRADED by calling a pingback URL.
 Kener evaluates the number of signals received within this time span depending on the window mode.
 
 **Important:** Pingback counts are never accumulated across different days. Counts are reset at the end of each day, and when a new day begins, the service will be reported with the default status until pingbacks are received and counted again within the new day's time window.
 
-**Note:** Only pingbacks registered with status UP are counted towards the `UP count` and `DEGRADED count` thresholds. Pingbacks with DOWN or DEGRADED status are not included in the count.
+**How pingbacks are counted:**
+- Pingbacks are counted separately by status: UP, DOWN, and DEGRADED.
+- The monitor evaluates the count of each status type to determine the final service status.
+- UP pingbacks count towards both `UP count` threshold and `DEGRADED count` threshold (fallback behavior).
+- DEGRADED pingbacks count only towards `DEGRADED count` threshold.
+- DOWN pingbacks are tracked but do not contribute to any threshold.
 
 <div class="border rounded-md">
 
@@ -35,43 +40,49 @@ This is a standard cron expression that defines how often Kener will run this mo
 
 ### Sliding window mode
 
-In `sliding` mode, Kener will count the number of UP pingbacks received between the last execution and now (within the current day only).
+In `sliding` mode, Kener counts pingbacks received during the **previous cron execution period** only (within the current day). For example, if the cron runs every 10 minutes, at 08:10 it counts pingbacks from 08:00-08:09, at 08:20 it counts pingbacks from 08:10-08:19, and so on.
 
-**Status Evaluation:**
-- If the pingback count is equal to or greater than `UP count`, the service is considered **UP**.
-- If `DEGRADED count > 0` and the pingback count is lower than `UP count` but greater than or equal to `DEGRADED count`, the service is considered **DEGRADED**.
-- If the pingback count is lower than `DEGRADED count` (or `UP count` when `DEGRADED count = 0`), the service is considered **DOWN**.
+**Status Evaluation Logic:**
+1. If `UP count >= upCount` → service is **UP**
+2. Else, if `DEGRADED count > 0`:
+   - If `DEGRADED count >= degradedCount` → service is **DEGRADED**
+   - Else, if `UP count >= degradedCount` → service is **DEGRADED** (fallback: not enough UPs for UP status, but enough for DEGRADED)
+   - Else → service is **DOWN**
+3. Else (when `DEGRADED count = 0`) → service is **DOWN**
 
 **Binary Mode (DEGRADED count = 0):**
 When `DEGRADED count` is set to 0, the monitor operates in binary mode, returning only **UP** or **DOWN** status. The DEGRADED status is never returned.
 
 **Example Evaluation Table:**
 
-| UP Count | DEGRADED Count | Pingback Count | Status |
-|----------|----------------|----------------|--------|
-| 10 | 5 | 15 | UP |
-| 10 | 5 | 7 | DEGRADED |
-| 10 | 5 | 3 | DOWN |
-| 10 | 0 | 15 | UP |
-| 10 | 0 | 7 | DOWN (binary mode) |
-| 10 | 0 | 3 | DOWN (binary mode) |
+| UP Count Threshold | DEGRADED Count Threshold | UP Pingbacks | DEGRADED Pingbacks | DOWN Pingbacks | Final Status | Reason |
+|-------------------|-------------------------|--------------|-------------------|----------------|--------------|---------|
+| 10 | 5 | 15 | 2 | 1 | UP | UP count (15) >= threshold (10) |
+| 10 | 5 | 8 | 6 | 1 | DEGRADED | DEGRADED count (6) >= threshold (5) |
+| 10 | 5 | 7 | 2 | 1 | DEGRADED | UP count (7) >= degradedCount (5) |
+| 10 | 5 | 3 | 2 | 5 | DOWN | Neither threshold met |
+| 10 | 0 | 15 | 0 | 0 | UP | UP count (15) >= threshold (10) |
+| 10 | 0 | 7 | 3 | 2 | DOWN | Binary mode: UP count (7) < threshold (10) |
 
 ### Fixed window mode
 
-In `fixed` mode, Kener counts UP pingbacks received from the `time window start` until the current execution time, but only until the end of the current day.
+In `fixed` mode, Kener counts all pingbacks (UP, DOWN, DEGRADED) received from the `time window start` until the current execution time, limited to the end of the current day. Pingbacks received before the time window start are not counted.
 
 **Monitor behavior based on execution time:**
 
 1. **Before time window start**: The monitor returns the default status without counting pingbacks.
 
 2. **Between time window start and end**: Pingbacks are counted from `time window start` until now.
-   - If the pingback count is equal to or greater than `UP count`, the service is considered **UP**.
+   - If `UP count >= upCount` → service is **UP**
    - Otherwise, the monitor returns the default status. The service is **not** marked as DEGRADED or DOWN during this period.
 
-3. **After time window end**: Pingbacks are counted from `time window start` until now (limited to the end of the current day).
-   - If the pingback count is equal to or greater than `UP count`, the service is considered **UP**.
-   - If `DEGRADED count > 0` and the pingback count is lower than `UP count` but greater than or equal to `DEGRADED count`, the service is considered **DEGRADED**.
-   - If the pingback count is lower than `DEGRADED count` (or `UP count` when `DEGRADED count = 0`), the service is considered **DOWN**.
+3. **After time window end**: Pingbacks are counted from `time window start` until now (limited to the end of the current day). The same evaluation logic as SLIDING mode applies:
+   - If `UP count >= upCount` → service is **UP**
+   - Else, if `DEGRADED count > 0`:
+     - If `DEGRADED count >= degradedCount` → service is **DEGRADED**
+     - Else, if `UP count >= degradedCount` → service is **DEGRADED** (fallback)
+     - Else → service is **DOWN**
+   - Else (when `DEGRADED count = 0`) → service is **DOWN**
 
 **Binary Mode (DEGRADED count = 0):**
 When `DEGRADED count` is set to 0, the monitor operates in binary mode, returning only **UP** or **DOWN** status after the time window end. The DEGRADED status is never returned.
@@ -79,6 +90,34 @@ When `DEGRADED count` is set to 0, the monitor operates in binary mode, returnin
 **Cron expression requirements for FIXED mode:**
 - The cron expression must schedule at least one execution **during** the time window (between start and end).
 - The cron expression must schedule at least one execution **after** the time window end on the same day.
+
+### Cumulative window mode
+
+In `cumulative` mode, Kener counts all pingbacks (UP, DOWN, DEGRADED) received from the **start of the current day (00:00)** until the current execution time. This is an accumulative count that grows throughout the day and resets at midnight.
+
+**Status Evaluation Logic:**
+Uses the same evaluation logic as SLIDING and FIXED (after window end) modes:
+1. If `UP count >= upCount` → service is **UP**
+2. Else, if `DEGRADED count > 0`:
+   - If `DEGRADED count >= degradedCount` → service is **DEGRADED**
+   - Else, if `UP count >= degradedCount` → service is **DEGRADED** (fallback)
+   - Else → service is **DOWN**
+3. Else (when `DEGRADED count = 0`) → service is **DOWN**
+
+**Binary Mode (DEGRADED count = 0):**
+When `DEGRADED count` is set to 0, the monitor operates in binary mode, returning only **UP** or **DOWN** status. The DEGRADED status is never returned.
+
+**Example behavior:**
+```
+Day: 2025-10-24, upCount=10, degradedCount=5, cron runs every hour
+
+08:00 - Received 3 UP, 1 DEGRADED → Counts: UP=3, DEGRADED=1 → Status: DOWN
+09:00 - Received 4 UP, 2 DEGRADED → Counts: UP=7, DEGRADED=3 → Status: DEGRADED (UP >= degradedCount)
+10:00 - Received 5 UP, 1 DEGRADED → Counts: UP=12, DEGRADED=4 → Status: UP (UP >= upCount)
+11:00 - Received 2 UP, 0 DEGRADED → Counts: UP=14, DEGRADED=4 → Status: UP
+
+Next day 00:00 - Counts reset to 0
+```
 
 ### Dynamic window mode
 

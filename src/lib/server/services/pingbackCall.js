@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { UP, DOWN, DEGRADED, REALTIME, TIMEOUT, ERROR, MANUAL, NO_DATA } from "../constants.js";
 import { GetNowTimestampUTC, GetDayEndTimestampUTC, GetDayStartTimestampUTC } from "../tool.js";
-import { GetLastHeartbeat, CountPingbacks } from "../controllers/controller.js";
+import { GetLastHeartbeat, CountPingbacksByStatus } from "../controllers/controller.js";
 import Cron from "croner";
 
 class PingbackCall {
@@ -12,26 +12,33 @@ class PingbackCall {
   }
 
   /**
-   * Evaluates pingback count and returns appropriate status
-   * @param {number} pingbacks - Number of pingbacks received
+   * Evaluates pingback counts by status and returns appropriate status
+   * @param {Object} counts - Pingback counts by status {UP, DOWN, DEGRADED}
    * @param {number} upCount - Threshold for UP status
    * @param {number} degradedCount - Threshold for DEGRADED status (0 = disabled)
    * @returns {string} Status: UP, DEGRADED, or DOWN
    */
-  evaluatePingbackStatus(pingbacks, upCount, degradedCount) {
-    if (pingbacks >= upCount) {
+  evaluatePingbackStatus(counts, upCount, degradedCount) {
+    // Rule 1: If UP count meets threshold, system is UP
+    if (counts.UP >= upCount) {
       return UP;
     }
 
-    // If degradedCount is 0, skip DEGRADED and go straight to DOWN
-    if (degradedCount === 0) {
-      return DOWN;
+    // Rule 2: If degradedCount is configured (> 0)
+    if (degradedCount > 0) {
+      // Case A: DEGRADED count meets threshold
+      if (counts.DEGRADED >= degradedCount) {
+        return DEGRADED;
+      }
+
+      // Case B: UP count didn't meet upCount, but meets degradedCount
+      // (system sent some UPs, but not enough to be UP, but enough to not be DOWN)
+      if (counts.UP >= degradedCount) {
+        return DEGRADED;
+      }
     }
 
-    if (pingbacks >= degradedCount) {
-      return DEGRADED;
-    }
-
+    // Rule 3: Neither UP nor DEGRADED thresholds met
     return DOWN;
   }
 
@@ -60,7 +67,7 @@ class PingbackCall {
       const nowInSeconds = GetNowTimestampUTC();
       let pingbacks = 0;
 
-      // DYNAMIC mode
+      // DYNAMIC mode - evaluates latency of last pingback
       if(windowMode === "DYNAMIC"){
         const todayInSeconds = GetDayStartTimestampUTC(nowInSeconds);
 
@@ -109,6 +116,29 @@ class PingbackCall {
         };
       }
 
+      // CUMULATIVE mode - count all pingbacks from start of day until now
+      if(windowMode === "CUMULATIVE"){
+        const todayStartInSeconds = GetDayStartTimestampUTC(nowInSeconds);
+        const endOfDayInSeconds = GetDayEndTimestampUTC(nowInSeconds);
+        const countUntil = Math.min(nowInSeconds, endOfDayInSeconds);
+
+        // Count pingbacks by status since start of day
+        const counts = await CountPingbacksByStatus(
+          this.monitor.tag,
+          todayStartInSeconds,
+          countUntil
+        );
+
+        // Evaluate status based on counts
+        const status = this.evaluatePingbackStatus(counts, upCount, degradedCount);
+
+        return {
+          status: status,
+          latency: 0,
+          type: REALTIME
+        };
+      }
+
       // FIXED window mode - count pingbacks only in specific time window
       if(windowMode === "FIXED"){
         if (!timeWindowStart || !timeWindowEnd) {
@@ -137,16 +167,21 @@ class PingbackCall {
           };
         }
 
-        // Rule 2: Between window start and end
+        // Calculate counting period (from window start to now, limited to end of day)
+        const windowStartInSeconds = Math.floor(startDate.getTime() / 1000);
+        const endOfDayInSeconds = GetDayEndTimestampUTC(nowInSeconds);
+        const countUntil = Math.min(nowInSeconds, endOfDayInSeconds);
+
+        // Count pingbacks by status
+        const counts = await CountPingbacksByStatus(
+          this.monitor.tag,
+          windowStartInSeconds,
+          countUntil
+        );
+
+        // Rule 2: During window - report only UP if threshold met, otherwise default status
         if (currentDate >= startDate && currentDate <= endDate) {
-          const windowStartInSeconds = Math.floor(startDate.getTime() / 1000);
-          const endOfDayInSeconds = GetDayEndTimestampUTC(nowInSeconds);
-          const countUntil = Math.min(nowInSeconds, endOfDayInSeconds);
-
-          pingbacks = await CountPingbacks(this.monitor.tag, windowStartInSeconds, countUntil);
-
-          // Only return UP if upCount is met, otherwise return default status
-          if (pingbacks >= upCount) {
+          if (counts.UP >= upCount) {
             return {
               status: UP,
               latency: 0,
@@ -161,16 +196,9 @@ class PingbackCall {
           };
         }
 
-        // Rule 3: After window end - evaluate pingback count against all thresholds
+        // Rule 3: After window end - evaluate all statuses (UP/DEGRADED/DOWN)
         if (currentDate > endDate) {
-          const windowStartInSeconds = Math.floor(startDate.getTime() / 1000);
-          const endOfDayInSeconds = GetDayEndTimestampUTC(nowInSeconds);
-          const countUntil = Math.min(nowInSeconds, endOfDayInSeconds);
-
-          pingbacks = await CountPingbacks(this.monitor.tag, windowStartInSeconds, countUntil);
-
-          // Evaluate status based on pingback count
-          const status = this.evaluatePingbackStatus(pingbacks, upCount, degradedCount);
+          const status = this.evaluatePingbackStatus(counts, upCount, degradedCount);
 
           return {
             status: status,
@@ -180,21 +208,36 @@ class PingbackCall {
         }
       }
 
-      // SLIDING window mode - count pingbacks for each cron execution
+      // SLIDING window mode - count pingbacks from previous cron execution period
       if(windowMode === "SLIDING"){
-        // Use croner to calculate expected heartbeat time
+        // Use croner to calculate previous execution window
         const cronJob = Cron(this.monitor.cron);
-        const prevDate = cronJob.previousRun();
-        const previousInSeconds = Math.floor(prevDate.getTime() / 1000);
+        const currentRunDate = cronJob.nextRun(new Date(nowInSeconds * 1000 - 1000)); // Current run
+        const previousRunDate = cronJob.previousRun(currentRunDate);
 
-        // Limit counting to the end of current day
+        const previousRunInSeconds = Math.floor(previousRunDate.getTime() / 1000);
+        const currentRunInSeconds = Math.floor(currentRunDate.getTime() / 1000);
+
+        // Count period: [previousRun, currentRun - 1 second]
+        const countFrom = previousRunInSeconds;
+        const countUntil = currentRunInSeconds - 1;
+
+        // Limit to current day
+        const todayStartInSeconds = GetDayStartTimestampUTC(nowInSeconds);
         const endOfDayInSeconds = GetDayEndTimestampUTC(nowInSeconds);
-        const countUntil = Math.min(nowInSeconds, endOfDayInSeconds);
 
-        pingbacks = await CountPingbacks(this.monitor.tag, previousInSeconds, countUntil);
+        const finalCountFrom = Math.max(countFrom, todayStartInSeconds);
+        const finalCountUntil = Math.min(countUntil, endOfDayInSeconds);
 
-        // Evaluate status based on pingback count
-        const status = this.evaluatePingbackStatus(pingbacks, upCount, degradedCount);
+        // Count pingbacks by status in the previous execution period
+        const counts = await CountPingbacksByStatus(
+          this.monitor.tag,
+          finalCountFrom,
+          finalCountUntil
+        );
+
+        // Evaluate status based on counts
+        const status = this.evaluatePingbackStatus(counts, upCount, degradedCount);
 
         return {
           status: status,

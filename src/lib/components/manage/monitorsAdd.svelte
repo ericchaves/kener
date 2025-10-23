@@ -159,7 +159,7 @@
         timeWindowStart: "07:00",
         timeWindowEnd: "09:00",
         secretString: RandomString(32),
-        windowMode: "SLIDING", // DYNAMIC, SLIDING or FIXED
+        windowMode: "SLIDING", // DYNAMIC, SLIDING, FIXED or CUMULATIVE
         eval: DefaultPingbackEval,
       }
     };

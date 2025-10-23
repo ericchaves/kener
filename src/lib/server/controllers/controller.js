@@ -405,8 +405,9 @@ export const GetLastHeartbeat = async (monitor_tag) => {
   return await db.getLastHeartbeat(monitor_tag);
 };
 
-export const CountPingbacks = async(monitor_tag, minTimestamp, timestamp) => {
-  return await db.countPingbacks(monitor_tag, minTimestamp, timestamp);
+
+export const CountPingbacksByStatus = async(monitor_tag, minTimestamp, maxTimestamp) => {
+  return await db.countPingbacksByStatus(monitor_tag, minTimestamp, maxTimestamp);
 }
 
 
@@ -558,10 +559,10 @@ export const RegisterPingback = async (tag, secret, req) => {
           "default_status",
           `return (${pingbackConfig.eval})(req, default_status);`);
         let evalResp = await evalFunction(req, status);
-        if(!/UP|DOWN|DEGRADED/.test(evalResp.status)){
+        if([UP,DOWN,DEGRADED].indexOf(evalResp.status.toUpperCase()) == -1 ){
           throw new Error(`Invalid eval function status: ${evalResp.status}`);
         }
-        status = evalResp.status;
+        status = evalResp.status.toUpperCase();
         if(!isNaN(parseInt(evalResp.latency))){
           latency = Math.abs(parseInt(evalResp.latency));
         }

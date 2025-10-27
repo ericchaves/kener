@@ -119,9 +119,123 @@ Day: 2025-10-24, upCount=10, degradedCount=5, cron runs every hour
 Next day 00:00 - Counts reset to 0
 ```
 
+## Sending Pingbacks
+
+Pingbacks can be sent with status and latency information in two ways:
+
+### With Explicit Status (Query Parameters or JSON Body)
+
+When you provide an explicit `status` parameter (other than `default`), the eval function **will not be executed**, and the provided status will be registered directly.
+
+**Via Query Parameter (GET or POST):**
+```bash
+# Send UP status
+curl "http://kener/api/pingback/tag:secret?status=up"
+
+# Send DOWN status with latency
+curl "http://kener/api/pingback/tag:secret?status=down&latency=500"
+
+# Send DEGRADED status
+curl "http://kener/api/pingback/tag:secret?status=degraded&latency=800"
+```
+
+**Via JSON Body (POST):**
+```bash
+# Send status with latency
+curl -X POST "http://kener/api/pingback/tag:secret" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"down","latency":500}'
+```
+
+**Valid Status Values:**
+- `up` - Service is operational
+- `down` - Service is down
+- `degraded` - Service is degraded
+- `default` - Use monitor's default_status (triggers eval function if configured)
+
+**Note:** Latency is optional and defaults to 0 if not provided.
+
+---
+
+### Without Status or With Eval Function
+
+When no explicit `status` is provided (or `status=default`), the eval function will be executed (if configured) to determine the status.
+
+**Example:**
+```bash
+# No status provided - eval function will execute
+curl "http://kener/api/pingback/tag:secret"
+
+# Status=default - eval function will execute
+curl "http://kener/api/pingback/tag:secret?status=default"
+
+# Only latency provided - eval function will execute
+curl "http://kener/api/pingback/tag:secret?latency=100"
+```
+
+---
+
+## Pingback Response
+
+### Success Response (200 OK)
+
+```json
+{
+  "status": "UP",
+  "latency": 150,
+  "eval_executed": false,
+  "timestamp": 1730000001
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | Final status registered in database: `UP`, `DOWN`, or `DEGRADED` |
+| `latency` | number | Latency value registered (milliseconds) |
+| `eval_executed` | boolean | Whether eval function was executed (`true`) or status came from request/default (`false`) |
+| `timestamp` | number | Unix timestamp (UTC seconds) when pingback was registered in the database |
+
+---
+
+### Error Response
+
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Error description"
+  },
+  "timestamp": 1730000001
+}
+```
+
+### Error Codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `INVALID_URL_FORMAT` | 400 | Pingback URL format is invalid |
+| `INVALID_REQUEST_STATUS` | 400 | Status parameter is not up/down/degraded/default |
+| `EVAL_EXECUTION_FAILED` | 400 | Eval function threw an error during execution |
+| `EVAL_INVALID_STATUS` | 400 | Eval function returned invalid status (not UP/DOWN/DEGRADED) |
+| `INVALID_SECRET` | 401 | Secret string does not match monitor configuration |
+| `MONITOR_NOT_FOUND` | 404 | No monitor exists with the provided tag |
+| `MONITOR_CONFIG_MISSING` | 500 | Monitor does not have pingback configuration |
+| `MONITOR_CONFIG_INVALID` | 500 | Monitor configuration is corrupted |
+| `DATABASE_INSERT_FAILED` | 500 | Failed to save pingback to database |
+| `INTERNAL_SERVER_ERROR` | 500 | Unexpected server error occurred |
+
+**Security Note:** Error messages are sanitized to prevent exposure of stack traces, internal code, database details, or file paths. Server logs contain full error details for debugging.
+
+---
+
 ### Dynamic window mode
 
-In `dynamic` mode, you must define an eval function that will be invoked each time you call the `pingback` to determine the status of the signal (either UP, DOWN, or DEGRADED).
+In `dynamic` mode, you can optionally define an eval function that will be invoked to determine the status of the signal (either UP, DOWN, or DEGRADED).
+
+**Important:** Eval function is **optional** in DYNAMIC mode. If not configured, you can send status via query parameters or request body (see "Sending Pingbacks" above).
+
 When the monitor executes, it will assume the status value of the last pingback invocation from the current day.
 
 If the last pingback was from a previous day, the monitor returns the default status.

@@ -533,65 +533,232 @@ export const RegisterHeartbeat = async (tag, secret) => {
 };
 
 export const RegisterPingback = async (tag, secret, req) => {
-  let monitor = await db.getMonitorByTag(tag);
-  if (!monitor) {
-    return null;
-  }
-  let typeData = monitor.type_data;
-  if (!typeData) {
-    return null;
-  }
   try {
-    let pingbackConfig = JSON.parse(typeData);
+    // 1. Validate monitor exists
+    let monitor = await db.getMonitorByTag(tag);
+    if (!monitor) {
+      return {
+        error: {
+          code: "MONITOR_NOT_FOUND",
+          message: "Monitor not found"
+        },
+        timestamp: GetNowTimestampUTC()
+      };
+    }
+
+    // 2. Validate configuration exists
+    let typeData = monitor.type_data;
+    if (!typeData) {
+      return {
+        error: {
+          code: "MONITOR_CONFIG_MISSING",
+          message: "Monitor configuration missing"
+        },
+        timestamp: GetNowTimestampUTC()
+      };
+    }
+
+    // 3. Parse configuration
+    let pingbackConfig;
+    try {
+      pingbackConfig = JSON.parse(typeData);
+    } catch (e) {
+      console.error("Invalid monitor configuration JSON:", {
+        monitor_tag: tag,
+        error_message: e.message
+      });
+      return {
+        error: {
+          code: "MONITOR_CONFIG_INVALID",
+          message: "Invalid monitor configuration"
+        },
+        timestamp: GetNowTimestampUTC()
+      };
+    }
+
+    // 4. Validate secret
     let pingbackSecret = pingbackConfig.secretString;
     if (pingbackSecret !== secret) {
-      return null;
+      return {
+        error: {
+          code: "INVALID_SECRET",
+          message: "Invalid secret"
+        },
+        timestamp: GetNowTimestampUTC()
+      };
     }
 
     let status = monitor.default_status;
     let latency = 0;
     let type = SIGNAL;
+    let evalExecuted = false;
 
-    if(pingbackConfig.windowMode === "DYNAMIC"){
-      try{
+    // 5. Determine status and latency
+    const requestedStatus = (req.body?.status || req.query?.status)?.toLowerCase();
+
+    if (requestedStatus && requestedStatus !== 'default') {
+      // Use status from request, do NOT execute eval
+      const validStatuses = ['up', 'down', 'degraded'];
+
+      if (!validStatuses.includes(requestedStatus)) {
+        console.warn("Invalid status in request:", {
+          monitor_tag: monitor.tag,
+          received_status: requestedStatus,
+          expected_values: validStatuses
+        });
+        return {
+          error: {
+            code: "INVALID_REQUEST_STATUS",
+            message: "Invalid status parameter"
+          },
+          timestamp: GetNowTimestampUTC()
+        };
+      }
+
+      status = requestedStatus.toUpperCase();
+
+      // Parse latency from request
+      const rawLatency = req.body?.latency || req.query?.latency || 0;
+      const parsedLatency = parseInt(rawLatency);
+      latency = !isNaN(parsedLatency) ? Math.abs(parsedLatency) : 0;
+
+      evalExecuted = false;
+
+    } else if (pingbackConfig.eval) {
+      // Status is "default" or absent - execute eval function
+      try {
         const evalFunction = new Function(
           "req",
           "default_status",
-          `return (${pingbackConfig.eval})(req, default_status);`);
+          `return (${pingbackConfig.eval})(req, default_status);`
+        );
+
         let evalResp = await evalFunction(req, status);
-        if([UP,DOWN,DEGRADED].indexOf(evalResp.status.toUpperCase()) == -1 ){
-          throw new Error(`Invalid eval function status: ${evalResp.status}`);
+
+        // Validate eval response
+        if (!evalResp || typeof evalResp !== 'object') {
+          throw new Error("Eval function must return an object");
         }
-        status = evalResp.status.toUpperCase();
-        if(!isNaN(parseInt(evalResp.latency))){
-          latency = Math.abs(parseInt(evalResp.latency));
+
+        if (!evalResp.status) {
+          throw new Error("Eval function must return a status property");
         }
-      }catch(e){
-        console.error("Error evaluating pingback:", {
-          config: pingbackConfig.eval,
-          error: e.message,
-          req: JSON.stringify(req)
+
+        const validStatuses = [UP, DOWN, DEGRADED];
+        const receivedStatus = evalResp.status.toUpperCase();
+
+        if (!validStatuses.includes(receivedStatus)) {
+          console.error("Invalid status from eval function:", {
+            monitor_tag: monitor.tag,
+            received_status: receivedStatus,
+            expected_statuses: validStatuses
+          });
+          return {
+            error: {
+              code: "EVAL_INVALID_STATUS",
+              message: "Eval function returned invalid status"
+            },
+            timestamp: GetNowTimestampUTC()
+          };
+        }
+
+        status = receivedStatus;
+
+        // Parse latency from eval response
+        const evalLatency = parseInt(evalResp.latency);
+        latency = !isNaN(evalLatency) ? Math.abs(evalLatency) : 0;
+
+        evalExecuted = true;
+
+      } catch(e) {
+        // Log internal error with full details
+        console.error("Eval function execution error:", {
+          monitor_tag: monitor.tag,
+          window_mode: pingbackConfig.windowMode,
+          error_message: e.message,
+          error_name: e.name,
+          timestamp: GetNowTimestampUTC()
         });
-        return null;
+
+        // Return sanitized error to client
+        return {
+          error: {
+            code: "EVAL_EXECUTION_FAILED",
+            message: "Failed to execute eval function"
+          },
+          timestamp: GetNowTimestampUTC()
+        };
       }
+
+    } else {
+      // No eval and no status - use default_status
+      status = monitor.default_status;
+
+      // Parse latency from request
+      const rawLatency = req.body?.latency || req.query?.latency || 0;
+      const parsedLatency = parseInt(rawLatency);
+      latency = !isNaN(parsedLatency) ? Math.abs(parsedLatency) : 0;
+
+      evalExecuted = false;
     }
 
-    if(pingbackConfig.windowMode === "FIXED" || pingbackConfig.windowMode === "SLIDING"){
-      status = UP;
-    }
+    // 6. Get timestamp
+    const timestamp = GetNowTimestampUTC();
 
-    return InsertMonitoringData({
+    // 7. Insert into database
+    try {
+      await InsertMonitoringData({
         monitor_tag: monitor.tag,
-        timestamp: GetNowTimestampUTC(),
+        timestamp: timestamp,
         status,
         latency,
         type,
       });
+    } catch(e) {
+      // Log internal error
+      console.error("Failed to insert monitoring data:", {
+        monitor_tag: monitor.tag,
+        timestamp: timestamp,
+        status: status,
+        error_message: e.message
+      });
+
+      // Return sanitized error to client
+      return {
+        error: {
+          code: "DATABASE_INSERT_FAILED",
+          message: "Failed to save pingback data"
+        },
+        timestamp: timestamp
+      };
+    }
+
+    // 8. Return success response with details
+    return {
+      status: status,
+      latency: latency,
+      eval_executed: evalExecuted,
+      timestamp: timestamp
+    };
 
   } catch (e) {
-    console.error("Error registering pingback:", e);
+    // Catch-all for unexpected errors
+    console.error("Unexpected error in RegisterPingback:", {
+      monitor_tag: tag,
+      error_message: e.message,
+      error_stack: e.stack,
+      error_name: e.name,
+      timestamp: GetNowTimestampUTC()
+    });
+
+    return {
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Internal server error"
+      },
+      timestamp: GetNowTimestampUTC()
+    };
   }
-  return null;
 };
 
 export const GenerateToken = async (data) => {

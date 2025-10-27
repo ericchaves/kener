@@ -515,19 +515,6 @@
         return;
       }
       if (newMonitor.pingbackConfig.windowMode === "DYNAMIC") {
-        
-        // Validate eval function
-        newMonitor.pingbackConfig.eval = newMonitor.pingbackConfig.eval?.trim() || "";
-        
-        if (!newMonitor.pingbackConfig.eval) {
-          invalidFormMessage = "Eval function is required for DYNAMIC mode";
-          return;
-        }
-
-        if (!(await isValidEval(newMonitor.pingbackConfig.eval))) {
-          invalidFormMessage = invalidFormMessage + ". Invalid eval function";
-          return;
-        }
 
         // Validate timeout (REQUIRED)
         if (newMonitor.pingbackConfig.timeout === undefined || 
@@ -669,6 +656,17 @@
           return;
         }
       }
+
+      // Validate eval function (OPTIONAL) for ALL pingback modes
+      if (!!newMonitor.pingbackConfig.eval) {
+        newMonitor.pingbackConfig.eval = newMonitor.pingbackConfig.eval.trim();
+
+        if (!(await isValidEval(newMonitor.pingbackConfig.eval))) {
+          invalidFormMessage = invalidFormMessage + ". Invalid eval";
+          return;
+        }
+      }
+
       newMonitor.type_data = JSON.stringify(newMonitor.pingbackConfig);
     }
     formState = "loading";
@@ -1846,6 +1844,20 @@
               <Clipboard class="copy-btn absolute h-4 w-4" />
             </Button>
           </div>
+
+          <!-- General help text about sending pingbacks -->
+          <div class="col-span-6 mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950">
+            <p class="text-xs font-medium text-blue-900 dark:text-blue-100">
+              <strong>Sending Pingbacks:</strong> You can send status directly via URL query parameters
+              (<code class="rounded bg-blue-100 px-1 dark:bg-blue-900">?status=up&latency=100</code>) or JSON body
+              (<code class="rounded bg-blue-100 px-1 dark:bg-blue-900">{"{"}status: 'down'{"}"}</code>).
+              Valid status values: <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">up</code>,
+              <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">down</code>,
+              <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">degraded</code>, or
+              <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">default</code> (to trigger eval if configured).
+            </p>
+          </div>
+
           <div class="mt-4 flex gap-2">
 
             <div class="w-36">
@@ -1942,18 +1954,20 @@
           </span>
         </div>
         
-        {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}      
+        <!-- Eval function for DYNAMIC mode -->
+        {#if newMonitor.pingbackConfig.windowMode == "DYNAMIC"}
           <div class="col-span-6 mt-4">
-            <Label for="PingbackEvals">Pingback dynamic eval</Label>
+            <Label for="PingbackEvals">Pingback dynamic eval (Optional)</Label>
             <p class="my-1 text-xs text-muted-foreground">
-              You can write a custom eval function to evaluate the payload sent. The function should return a promise that
-              resolves to an object with status and latency. <a
+              Eval function is <strong>optional</strong>. If not provided, send status via query parameters (<code>?status=up</code>) or JSON body.
+              When provided, eval executes only when status is not explicitly sent or is set to "default".
+              The function should return a promise that resolves to an object with status and latency. <a
                 target="_blank"
                 class="font-medium text-primary"
                 href="https://kener.ing/docs/monitors-pingback#eval">Read the docs</a
-              > to learn
+              > to learn more.
             </p>
-            
+
             <div class="overflow-hidden rounded-md">
               <CodeMirror
                 bind:value={newMonitor.pingbackConfig.eval}
@@ -1970,9 +1984,43 @@
                 }}
               />
             </div>
-            
+
           </div>
-          {/if}
+        {/if}
+
+        <!-- Eval function for SLIDING, FIXED, and CUMULATIVE modes -->
+        {#if /^(SLIDING|FIXED|CUMULATIVE)$/i.test(newMonitor.pingbackConfig.windowMode)}
+          <div class="col-span-6 mt-4">
+            <Label for="PingbackEvalsOtherModes">Pingback eval (Optional)</Label>
+            <p class="my-1 text-xs text-muted-foreground">
+              Eval function is <strong>optional</strong>. If not provided, send status via query parameters (<code>?status=up&latency=100</code>) or JSON body (<code>{"{"}status: 'down', latency: 500{"}"}</code>).
+              When provided, eval executes only when status is not explicitly sent or is set to "default".
+              The function should return a promise that resolves to an object with status and latency. <a
+                target="_blank"
+                class="font-medium text-primary"
+                href="https://kener.ing/docs/monitors-pingback#sending-pingbacks">Read the docs</a
+              > to learn more.
+            </p>
+
+            <div class="overflow-hidden rounded-md">
+              <CodeMirror
+                bind:value={newMonitor.pingbackConfig.eval}
+                lang={javascript()}
+                theme={$mode == "dark" ? githubDark : githubLight}
+                styles={{
+                  "&": {
+                    width: "100%",
+                    maxWidth: "100%",
+                    height: "16rem",
+                    border: "1px solid hsl(var(--border) / var(--tw-border-opacity))",
+                    borderRadius: "0.375rem"
+                  }
+                }}
+              />
+            </div>
+
+          </div>
+        {/if}
 
           
         </div>

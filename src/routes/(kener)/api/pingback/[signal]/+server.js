@@ -60,6 +60,17 @@ function getHttpStatusForError(errorCode) {
   return statusMap[errorCode] || 500;
 }
 
+/**
+ * Returns headers to prevent caching by browsers and proxies
+ */
+function getNoCacheHeaders() {
+  return {
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  };
+}
+
 export async function GET({ request, params }) {
   let signal = params.signal;
   let signalData = signal.split(":");
@@ -71,7 +82,10 @@ export async function GET({ request, params }) {
         message: "Invalid pingback URL format"
       },
       timestamp: GetNowTimestampUTC()
-    }, { status: 400 });
+    }, {
+      status: 400,
+      headers: getNoCacheHeaders()
+    });
   }
 
   const req = await parseRequest(request, params);
@@ -85,17 +99,26 @@ export async function GET({ request, params }) {
         message: "Unknown error occurred"
       },
       timestamp: GetNowTimestampUTC()
-    }, { status: 500 });
+    }, {
+      status: 500,
+      headers: getNoCacheHeaders()
+    });
   }
 
   // Check if response is an error
   if (resp.error) {
     const statusCode = getHttpStatusForError(resp.error.code);
-    return json(resp, { status: statusCode });
+    return json(resp, {
+      status: statusCode,
+      headers: getNoCacheHeaders()
+    });
   }
 
   // Success
-  return json(resp, { status: 200 });
+  return json(resp, {
+    status: 200,
+    headers: getNoCacheHeaders()
+  });
 }
 
 export async function POST({ request, params }) {
@@ -109,7 +132,10 @@ export async function POST({ request, params }) {
         message: "Invalid pingback URL format"
       },
       timestamp: GetNowTimestampUTC()
-    }, { status: 400 });
+    }, {
+      status: 400,
+      headers: getNoCacheHeaders()
+    });
   }
 
   const req = await parseRequest(request, params);
@@ -123,15 +149,24 @@ export async function POST({ request, params }) {
         message: "Unknown error occurred"
       },
       timestamp: GetNowTimestampUTC()
-    }, { status: 500 });
+    }, {
+      status: 500,
+      headers: getNoCacheHeaders()
+    });
   }
 
   // Check if response is an error
   if (resp.error) {
     const statusCode = getHttpStatusForError(resp.error.code);
-    return json(resp, { status: statusCode });
+    return json(resp, {
+      status: statusCode,
+      headers: getNoCacheHeaders()
+    });
   }
 
   // Success
-  return json(resp, { status: 200 });
+  return json(resp, {
+    status: 200,
+    headers: getNoCacheHeaders()
+  });
 }

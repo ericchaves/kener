@@ -24,7 +24,7 @@
     allRecordTypes,
     ValidateIpAddress,
     ValidateCronExpression,
-    ValidateCronExecutionTimeWindow,
+    ValidateCronExecutionTimeWindowInUTC,
     IsValidHost,
     IsValidNameServer,
     GetGameFromId,
@@ -606,7 +606,7 @@
         }
 
         // Validate that cron executes during and after time window
-        const cronValidation = ValidateCronExecutionTimeWindow(
+        const cronValidation = ValidateCronExecutionTimeWindowInUTC(
           newMonitor.cron, 
           newMonitor.pingbackConfig.timeWindowStart,
           newMonitor.pingbackConfig.timeWindowEnd

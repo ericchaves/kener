@@ -8,6 +8,12 @@ class PingbackCall {
   monitor;
 
   constructor(monitor) {
+    if (!monitor) {
+      throw new Error("Monitor object is required for PingbackCall");
+    }
+    if (!monitor.tag) {
+      throw new Error("Monitor must have a tag property");
+    }
     this.monitor = monitor;
   }
 
@@ -53,6 +59,9 @@ class PingbackCall {
         };
       }
 
+      if (!this.monitor.type_data) {
+        throw new Error(`Monitor ${this.monitor.tag} is missing type_data configuration`);
+      }
       const { degradedCount, upCount, timeWindowStart, timeWindowEnd, windowMode } = this.monitor.type_data;
 
       // Validations
@@ -145,10 +154,16 @@ class PingbackCall {
           throw new Error("timeWindowStart and timeWindowEnd are required for FIXED mode");
         }
 
+        if (typeof timeWindowStart !== 'string' || typeof timeWindowEnd !== 'string') {
+          throw new Error("timeWindowStart and timeWindowEnd must be valid time strings");
+        }
         // Parse time window start and end
         const [startHour, startMin] = timeWindowStart.split(":").map(Number);
         const [endHour, endMin] = timeWindowEnd.split(":").map(Number);
 
+        if (isNaN(startHour) || isNaN(startMin) || isNaN(endHour) || isNaN(endMin)) {
+          throw new Error("Invalid time format in timeWindowStart or timeWindowEnd");
+        }
         // Create Date objects for window start and end times
         let startDate = new Date();
         startDate.setHours(startHour, startMin, 0, 0);
@@ -210,11 +225,22 @@ class PingbackCall {
 
       // SLIDING window mode - count pingbacks from previous cron execution period
       if(windowMode === "SLIDING"){
+        if (!this.monitor.cron || typeof this.monitor.cron !== 'string') {
+          throw new Error(`Monitor ${this.monitor.tag} requires valid cron expression for SLIDING mode`);
+        }
         // Use croner to calculate previous execution window
         const cronJob = Cron(this.monitor.cron);
         const currentRunDate = cronJob.nextRun(new Date(nowInSeconds * 1000 - 1000)); // Current run
         const previousRunDate = cronJob.previousRun(currentRunDate);
 
+        // if we dont have a previous run return default_status
+        if (!previousRunDate || !currentRunDate) {
+          return {
+            status: this.monitor.default_status,
+            latency: 0,
+            type: REALTIME
+          };
+        }
         const previousRunInSeconds = Math.floor(previousRunDate.getTime() / 1000);
         const currentRunInSeconds = Math.floor(currentRunDate.getTime() / 1000);
 

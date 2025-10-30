@@ -296,78 +296,100 @@ function GetGameFromId(list, id) {
  * Validates if a cron expression executes at least once during the time window
  * AND at least once after the time window end on the same day.
  *
- * @param {string} cronExpression - The cron expression to validate (e.g., "15/2 21-22 * * 1-5")
- * @param {string} timeWindowStart - Start time in HH:MM format (e.g., "21:00")
- * @param {string} timeWindowEnd - End time in HH:MM format (e.g., "22:00")
- * @returns {{valid: boolean, error: string|null}} Validation result with error message if invalid
+ * IMPORTANT: timeWindowStartUTC and timeWindowEndUTC are expected in UTC ('HH:mm')
+ * They are converted to local time internally for correct cron evaluation.
  *
- * @example
- * // Returns {valid: true, error: null}
- * // Executes during window (21:15, 21:17...) and after (22:15, 22:17...)
- * ValidateCronExecutionTimeWindow("15/2 21-22 * * 1-5", "21:00", "22:00")
- *
- * @example
- * // Returns {valid: false, error: "..."}
- * // Only executes at 20:00 (before window)
- * ValidateCronExecutionTimeWindow("0 20 * * *", "21:00", "22:00")
+ * @param {string} cronExpression - The cron expression (e.g., "15/2 21-22 * * 1-5")
+ * @param {string} timeWindowStartUTC - Start time in UTC, 'HH:mm' format (e.g., "00:00")
+ * @param {string} timeWindowEndUTC - End time in UTC, 'HH:mm' format (e.g., "01:00")
+ * @returns {{valid: boolean, error: string|null}} Validation result
  */
-function ValidateCronExecutionTimeWindow(cronExpression, timeWindowStart, timeWindowEnd) {
+function ValidateCronExecutionTimeWindowInUTC(
+  cronExpression,
+  timeWindowStartUTC,
+  timeWindowEndUTC
+) {
   try {
-    // Create cron job instance
-    const cronJob = Cron(cronExpression);
+    // Parse UTC times
+    const [startHourUTC, startMinUTC] = timeWindowStartUTC.split(':').map(Number);
+    const [endHourUTC, endMinUTC] = timeWindowEndUTC.split(':').map(Number);
 
-    // Get today's date as reference
-    const today = new Date();
+    // Validate UTC input format
+    if (
+      isNaN(startHourUTC) || isNaN(startMinUTC) ||
+      isNaN(endHourUTC) || isNaN(endMinUTC) ||
+      startHourUTC < 0 || startHourUTC > 23 ||
+      startMinUTC < 0 || startMinUTC > 59 ||
+      endHourUTC < 0 || endHourUTC > 23 ||
+      endMinUTC < 0 || endMinUTC > 59
+    ) {
+      return {
+        valid: false,
+        error: "Invalid UTC time format. Use 'HH:mm' with valid hours (00-23) and minutes (00-59)."
+      };
+    }
 
-    // Parse window start time (HH:MM format)
-    const [startHour, startMin] = timeWindowStart.split(':').map(Number);
+    // --- Build UTC Date objects (today at midnight UTC) ---
+    const todayUTC = new Date();
+    todayUTC.setUTCHours(0, 0, 0, 0);
 
-    // Parse window end time (HH:MM format)
-    const [endHour, endMin] = timeWindowEnd.split(':').map(Number);
+    const windowStartUTC = new Date(todayUTC);
+    windowStartUTC.setUTCHours(startHourUTC, startMinUTC, 0, 0);
 
-    // Create Date object for window start time today
-    const windowStart = new Date(today);
-    windowStart.setHours(startHour, startMin, 0, 0);
+    const windowEndUTC = new Date(todayUTC);
+    windowEndUTC.setUTCHours(endHourUTC, endMinUTC, 0, 0);
 
-    // Create Date object for window end time today
-    const windowEnd = new Date(today);
-    windowEnd.setHours(endHour, endMin, 0, 0);
+    // --- Convert to LOCAL time (for cron logic) ---
+    const startHourLocal = windowStartUTC.getHours();
+    const startMinLocal = windowStartUTC.getMinutes();
+    const endHourLocal = windowEndUTC.getHours();
+    const endMinLocal = windowEndUTC.getMinutes();
 
-    // Create Date object for end of day (23:59:59.999)
-    const endOfDay = new Date(today);
+    // Rebuild local Date objects using the local hour/minute values
+    const todayLocal = new Date();
+    todayLocal.setHours(0, 0, 0, 0); // midnight local time
+
+    const windowStart = new Date(todayLocal);
+    windowStart.setHours(startHourLocal, startMinLocal, 0, 0);
+
+    const windowEnd = new Date(todayLocal);
+    windowEnd.setHours(endHourLocal, endMinLocal, 0, 0);
+
+    const endOfDay = new Date(todayLocal);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // Validate window times
+    // --- Validate window logic ---
     if (windowEnd <= windowStart) {
       return {
         valid: false,
-        error: "Time window end must be after time window start"
+        error: "Time window end must be after time window start (in local time)"
       };
     }
 
-    // Check 1: Cron executes at least once DURING the time window
-    const nextRunDuringWindow = cronJob.nextRun(windowStart);
+    // --- Cron job (operates in local time) ---
+    const cronJob = Cron(cronExpression);
 
+    // Check 1: Must run at least once DURING the window
+    const nextRunDuringWindow = cronJob.nextRun(windowStart);
     if (!nextRunDuringWindow) {
       return {
         valid: false,
-        error: `Cron does not execute after ${timeWindowEnd}`
+        error: "Cron does not execute after " + format24h(windowStart)
       };
     }
 
-    const executesDuringWindow = nextRunDuringWindow >= windowStart &&
-                                 nextRunDuringWindow < windowEnd;
-
+    const executesDuringWindow = nextRunDuringWindow >= windowStart && nextRunDuringWindow < windowEnd;
     if (!executesDuringWindow) {
       return {
         valid: false,
-        error: "Cron must execute at least once between time window start and end"
+        error:
+          "Cron must execute at least once between " +
+          format24h(windowStart) + " and " + format24h(windowEnd)
       };
     }
 
-    // Check 2: Cron executes at least once AFTER the time window end
+    // Check 2: Must run at least once AFTER the window (same day)
     const nextRunAfterWindow = cronJob.nextRun(windowEnd);
-
     if (!nextRunAfterWindow) {
       return {
         valid: false,
@@ -375,9 +397,7 @@ function ValidateCronExecutionTimeWindow(cronExpression, timeWindowStart, timeWi
       };
     }
 
-    const executesAfterWindow = nextRunAfterWindow > windowEnd &&
-                                nextRunAfterWindow <= endOfDay;
-
+    const executesAfterWindow = nextRunAfterWindow > windowEnd && nextRunAfterWindow <= endOfDay;
     if (!executesAfterWindow) {
       return {
         valid: false,
@@ -385,20 +405,26 @@ function ValidateCronExecutionTimeWindow(cronExpression, timeWindowStart, timeWi
       };
     }
 
-    // All validations passed
-    return {
-      valid: true,
-      error: null
-    };
-
+    return { valid: true, error: null };
   } catch (e) {
-    // Log error and return false for invalid cron expressions
-    console.error('Error validating cron execution:', e);
+    console.error('Error validating cron execution in UTC:', e);
     return {
       valid: false,
-      error: `Invalid cron expression: ${e.message}`
+      error: "Invalid cron expression: " + e.message
     };
   }
+}
+
+/**
+ * Formats a Date as 'HH:mm' using 24-hour clock (local time)
+ * @param {Date} date
+ * @returns {string}
+ */
+function format24h(date) {
+  console.log(date);
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return h + ':' + m;
 }
 
 export {
@@ -411,7 +437,7 @@ export {
   IsValidURL,
   IsValidPort,
   ValidateCronExpression,
-  ValidateCronExecutionTimeWindow,
+  ValidateCronExecutionTimeWindowInUTC,
   SortMonitor,
   RandomString,
   GetGameFromId,

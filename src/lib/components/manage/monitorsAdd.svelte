@@ -156,8 +156,8 @@
         degradedTimeout: 500,
         upCount: 3,
         degradedCount: 1,
-        timeWindowStart: "07:00",
-        timeWindowEnd: "09:00",
+        timeWindowStart: "07:00", // 24h format in UTC
+        timeWindowEnd: "09:00",   // 24h format in UTC
         secretString: RandomString(32),
         windowMode: "SLIDING", // DYNAMIC, SLIDING, FIXED or CUMULATIVE
         eval: DefaultPingbackEval,
